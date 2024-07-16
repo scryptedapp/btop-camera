@@ -34,6 +34,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
     XAUTH = os.path.join(FILES, 'Xauthority')
     PIDFILE = os.path.join(FILES, 'Xvfb.pid')
     FFMPEG_PIDFILE = os.path.join(FILES, 'ffmpeg.pid')
+    XVFB_RUN = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'zip', 'unzipped', 'fs', 'xvfb-run')
 
     def __init__(self, nativeId: str = None) -> None:
         super().__init__(nativeId)
@@ -48,23 +49,37 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
                 await run_and_stream_output('apt-get update')
                 await run_and_stream_output('apt-get install -y xvfb xterm btop xfonts-base')
             else:
-                if platform.system() != 'Linux':
-                    raise Exception("This plugin is only supported on Linux.")
+                if platform.system() == 'Linux':
+                    needed = []
+                    if shutil.which('xvfb-run') is None:
+                        needed.append('xvfb-run')
+                    if shutil.which('xterm') is None:
+                        needed.append('xterm')
+                        needed.append('xfonts-base')
+                    if shutil.which('btop') is None:
+                        needed.append('btop')
+                    if shutil.which('ffmpeg') is None:
+                        needed.append('ffmpeg')
 
-                needed = []
-                if shutil.which('xvfb-run') is None:
-                    needed.append('xvfb-run')
-                if shutil.which('xterm') is None:
-                    needed.append('xterm')
-                    needed.append('xfonts-base')
-                if shutil.which('btop') is None:
-                    needed.append('btop')
-                if shutil.which('ffmpeg') is None:
-                    needed.append('ffmpeg')
+                    if needed:
+                        needed.sort()
+                        raise Exception(f"Please manually install the following and restart the plugin: {needed}")
+                elif platform.system() == 'Darwin':
+                    needed = []
+                    if shutil.which('ffmpeg') is None:
+                        needed.append('ffmpeg')
+                    if shutil.which('bpytop') is None:
+                        needed.append('bpytop')
+                    if shutil.which('xterm') is None and not os.path.exists('/opt/X11/bin/xterm'):
+                        needed.append('xquartz')
+                    if not os.path.exists('/opt/homebrew/opt/gnu-getopt/bin/getopt'):
+                        needed.append('gnu-getopt')
 
-                if needed:
-                    needed.sort()
-                    raise Exception(f"Please manually install the following and restart the plugin: {needed}")
+                    if needed:
+                        needed.sort()
+                        raise Exception(f"Please manually install the following and restart the plugin: {needed}")
+                else:
+                    raise Exception("This plugin only supports Linux and MacOS.")
 
             pid = self.read_pidfile()
             if pid:
@@ -88,23 +103,35 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
                     pass
 
             pathlib.Path(BtopCamera.FILES).mkdir(parents=True, exist_ok=True)
+
+            os.chmod(BtopCamera.XVFB_RUN, 0o755)
         except:
             import traceback
             traceback.print_exc()
+            await asyncio.sleep(3600)
             os._exit(1)
 
     async def init_stream(self) -> None:
         await self.dependencies_installed
 
         async def run_stream():
+            path = os.environ.get('PATH')
+            exe = 'btop'
+            if platform.system() == 'Darwin':
+                path = f'/opt/X11/bin:/opt/homebrew/opt/gnu-getopt/bin:{path}'
+                exe = 'bpytop'
+
             while True:
-                fut, pid = await run_and_stream_output(f'xvfb-run -n {self.virtual_display_num} -s "-screen 0 {self.display_dimensions}x24" -f {BtopCamera.XAUTH} xterm -maximized -e btop', return_pid=True)
+                fut, pid = await run_and_stream_output(f'{BtopCamera.XVFB_RUN} -e /dev/stdout -n {self.virtual_display_num} -s "-screen 0 {self.display_dimensions}x24" -f {BtopCamera.XAUTH} xterm -en UTF-8 -maximized -e {exe}',
+                                                       env={'PATH': path, "LANG": "en_US.UTF-8"}, return_pid=True)
 
                 # write pid to file
                 with open(BtopCamera.PIDFILE, 'w') as f:
                     f.write(str(pid))
 
                 await fut
+                print("Xvfb crashed, restarting in 5s...")
+                await asyncio.sleep(5)
 
         async def run_ffmpeg():
             await asyncio.sleep(5)
@@ -117,6 +144,8 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
                     f.write(str(pid))
 
                 await fut
+                print("ffmpeg crashed, restarting in 5s...")
+                await asyncio.sleep(5)
 
         asyncio.gather(run_stream(), run_ffmpeg())
 
