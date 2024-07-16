@@ -83,8 +83,6 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
     async def init_stream(self) -> None:
         await self.dependencies_installed
 
-        ffmpeg = await scrypted_sdk.mediaManager.getFFmpegPath()
-
         async def run_stream():
             while True:
                 fut, pid = await run_and_stream_output(f'xvfb-run -n {self.virtual_display_num} -s "-screen 0 {self.display_dimensions}x24" -f {BtopCamera.XAUTH} xterm -maximized -e btop', return_pid=True)
@@ -97,7 +95,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
 
         async def run_ffmpeg():
             while True:
-                await run_and_stream_output(f'{ffmpeg} -loglevel error -f x11grab -framerate 15 -draw_mouse 0 -i :{self.virtual_display_num} -c:v libx264 -pix_fmt yuvj420p -preset ultrafast -bf 0 -g 60 -an -dn -f flv -listen 1 rtmp://localhost:{self.rtmp_port}/stream', env={'XAUTHORITY': BtopCamera.XAUTH})
+                await run_and_stream_output(f'ffmpeg -loglevel error -f x11grab -framerate 15 -draw_mouse 0 -i :{self.virtual_display_num} -c:v libx264 -pix_fmt yuvj420p -preset ultrafast -bf 0 -g 60 -an -dn -f flv -listen 1 rtmp://localhost:{self.rtmp_port}/stream', env={'XAUTHORITY': BtopCamera.XAUTH})
 
         asyncio.gather(run_stream(), run_ffmpeg())
 
