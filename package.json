@@ -6,7 +6,13 @@
    "keywords": [
       "scrypted",
       "plugin",
-      "btop"
+      "btop",
+      "top",
+      "htop",
+      "ntop",
+      "system",
+      "monitoring",
+      "cpu"
    ],
    "scripts": {
       "scrypted-setup-project": "scrypted-setup-project",
