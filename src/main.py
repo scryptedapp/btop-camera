@@ -87,10 +87,10 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
                     xvfb_run_process = psutil.Process(pid)
                     for child in xvfb_run_process.children(recursive=True):
                         if child.name() == 'Xvfb':
-                            child.terminate()
+                            child.kill()
+                    xvfb_run_process.kill()
                 except:
                     pass
-                shutil.rmtree(BtopCamera.FILES, ignore_errors=True)
 
             pid = self.read_ffmpeg_pidfile()
             if pid:
@@ -98,10 +98,12 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
                     ffmpeg_process = psutil.Process(pid)
                     for child in ffmpeg_process.children(recursive=True):
                         if child.name() == 'ffmpeg':
-                            child.terminate()
+                            child.kill()
+                    ffmpeg_process.kill()
                 except:
                     pass
 
+            shutil.rmtree(BtopCamera.FILES, ignore_errors=True)
             pathlib.Path(BtopCamera.FILES).mkdir(parents=True, exist_ok=True)
 
             os.chmod(BtopCamera.XVFB_RUN, 0o755)
