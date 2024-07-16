@@ -1,8 +1,13 @@
 import asyncio
+import json
 import os
 import pathlib
 import platform
+import signal
 import shutil
+import subprocess
+import sys
+import time
 from typing import Any, Callable, Dict, Tuple
 
 import psutil
@@ -11,21 +16,101 @@ import scrypted_sdk
 from scrypted_sdk import ScryptedDeviceBase, VideoCamera, ResponseMediaStreamOptions, Settings, Setting, ScryptedInterface, ScryptedMimeTypes
 
 
-async def run_and_stream_output(cmd: str, env: Dict[str, str] = {}, on_stdout: Callable[[str], Any] = print, on_stderr: Callable[[str], Any] = print, return_pid: bool = False) -> Tuple[asyncio.Future, int] | None:
+async def run_and_stream_output(cmd: str, env: Dict[str, str] = {}, return_pid: bool = False) -> Tuple[asyncio.Future, int] | None:
     p = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=dict(os.environ, **env))
 
     async def read_streams():
         async def stream_stdout():
             async for line in p.stdout:
-                on_stdout(line.decode('utf-8'))
+                print(line.decode('utf-8'))
         async def stream_stderr():
             async for line in p.stderr:
-                on_stderr(line.decode('utf-8'))
+                print(line.decode('utf-8'))
 
         await asyncio.gather(stream_stdout(), stream_stderr(), p.wait())
 
     if return_pid:
         return (asyncio.ensure_future(read_streams()), p.pid)
+    await read_streams()
+
+
+def multiprocess_main():
+    cmd = sys.argv[1].strip()
+    env = sys.argv[2].strip()
+    kill_proc = sys.argv[3].strip()
+
+    env = json.loads(env)
+    if kill_proc == 'None':
+        kill_proc = None
+
+    parent = psutil.Process(os.getppid())
+
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+    name = cmd.split()[0]
+    print(f"{name} starting")
+    sp = subprocess.Popen(cmd, shell=True, env=dict(os.environ, **env))
+
+    with open(os.path.join(BtopCamera.FILES, f"{kill_proc}.pid"), 'w') as f:
+        f.write(str(sp.pid))
+
+    while parent.is_running():
+        # check if the subprocess is still alive, if not then exit
+        if sp.poll() is not None:
+            break
+        time.sleep(3)
+
+    try:
+        print(f"{name} exiting")
+    except:
+        # in case stdout was closed
+        pass
+
+    if kill_proc:
+        try:
+            p = psutil.Process(sp.pid)
+            for child in p.children(recursive=True):
+                if child.name() == kill_proc:
+                    try:
+                        child.kill()
+                    except:
+                        pass
+            p.kill()
+        except:
+            pass
+
+    sp.terminate()
+    sp.wait()
+
+    try:
+        print(f"{name} exited")
+    except:
+        # in case stdout was closed
+        pass
+
+
+async def run_self_cleanup_subprocess(cmd: str, env: Dict[str, str] = {}, kill_proc: str = None) -> None:
+    exe = sys.executable
+    args = [
+        BtopCamera.THIS_FILE,
+        cmd,
+        json.dumps(env),
+        kill_proc or 'None',
+    ]
+
+    p = await asyncio.create_subprocess_exec(exe, *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True)
+
+    async def read_streams():
+        async def stream_stdout():
+            async for line in p.stdout:
+                print(line.decode('utf-8'))
+        async def stream_stderr():
+            async for line in p.stderr:
+                print(line.decode('utf-8'))
+
+        await asyncio.gather(stream_stdout(), stream_stderr(), p.wait())
+
     await read_streams()
 
 
@@ -35,6 +120,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
     PIDFILE = os.path.join(FILES, 'Xvfb.pid')
     FFMPEG_PIDFILE = os.path.join(FILES, 'ffmpeg.pid')
     XVFB_RUN = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'zip', 'unzipped', 'fs', 'xvfb-run')
+    THIS_FILE = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'zip', 'unzipped', 'main.py')
 
     def __init__(self, nativeId: str = None) -> None:
         super().__init__(nativeId)
@@ -124,28 +210,32 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
                 exe = 'bpytop'
 
             while True:
-                fut, pid = await run_and_stream_output(f'{BtopCamera.XVFB_RUN} -e /dev/stdout -n {self.virtual_display_num} -s "-screen 0 {self.display_dimensions}x24" -f {BtopCamera.XAUTH} xterm -en UTF-8 -maximized -e {exe}',
-                                                       env={'PATH': path, "LANG": "en_US.UTF-8"}, return_pid=True)
+                #fut, pid = await run_and_stream_output(f'{BtopCamera.XVFB_RUN} -e /dev/stdout -n {self.virtual_display_num} -s "-screen 0 {self.display_dimensions}x24" -f {BtopCamera.XAUTH} xterm -en UTF-8 -maximized -e {exe}',
+                #                                       env={'PATH': path, "LANG": "en_US.UTF-8"}, return_pid=True)
+                await run_self_cleanup_subprocess(f'{BtopCamera.XVFB_RUN} -n {self.virtual_display_num} -s "-screen 0 {self.display_dimensions}x24" -f {BtopCamera.XAUTH} xterm -en UTF-8 -maximized -e {exe}',
+                                                  env={'PATH': path, "LANG": "en_US.UTF-8"}, kill_proc='Xvfb')
 
                 # write pid to file
-                with open(BtopCamera.PIDFILE, 'w') as f:
-                    f.write(str(pid))
+                #with open(BtopCamera.PIDFILE, 'w') as f:
+                #    f.write(str(pid))
 
-                await fut
+                #await fut
                 print("Xvfb crashed, restarting in 5s...")
                 await asyncio.sleep(5)
 
         async def run_ffmpeg():
             await asyncio.sleep(5)
             while True:
-                fut, pid = await run_and_stream_output(f'ffmpeg -loglevel error -f x11grab -framerate 15 -draw_mouse 0 -i :{self.virtual_display_num} -c:v libx264 -pix_fmt yuvj420p -preset ultrafast -bf 0 -g 60 -an -dn -f flv -listen 1 rtmp://localhost:{self.rtmp_port}/stream',
-                                                       env={'XAUTHORITY': BtopCamera.XAUTH}, return_pid=True)
+                #fut, pid = await run_and_stream_output(f'ffmpeg -loglevel error -f x11grab -framerate 15 -draw_mouse 0 -i :{self.virtual_display_num} -c:v libx264 -pix_fmt yuvj420p -preset ultrafast -bf 0 -g 60 -an -dn -f flv -listen 1 rtmp://localhost:{self.rtmp_port}/stream',
+                #                                       env={'XAUTHORITY': BtopCamera.XAUTH}, return_pid=True)
+                await run_self_cleanup_subprocess(f'ffmpeg -loglevel error -f x11grab -framerate 15 -draw_mouse 0 -i :{self.virtual_display_num} -c:v libx264 -pix_fmt yuvj420p -preset ultrafast -bf 0 -g 60 -an -dn -f flv -listen 1 rtmp://localhost:{self.rtmp_port}/stream',
+                                                  env={'XAUTHORITY': BtopCamera.XAUTH}, kill_proc='ffmpeg')
 
                 # write pid to file
-                with open(BtopCamera.FFMPEG_PIDFILE, 'w') as f:
-                    f.write(str(pid))
+                #with open(BtopCamera.FFMPEG_PIDFILE, 'w') as f:
+                #    f.write(str(pid))
 
-                await fut
+                #await fut
                 print("ffmpeg crashed, restarting in 5s...")
                 await asyncio.sleep(5)
 
@@ -238,3 +328,6 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
 
 def create_scrypted_plugin():
     return BtopCamera()
+
+if __name__ == "__main__":
+    multiprocess_main()
