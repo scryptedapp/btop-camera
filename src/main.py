@@ -33,6 +33,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
     FILES = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'files')
     XAUTH = os.path.join(FILES, 'Xauthority')
     PIDFILE = os.path.join(FILES, 'Xvfb.pid')
+    FFMPEG_PIDFILE = os.path.join(FILES, 'ffmpeg.pid')
 
     def __init__(self, nativeId: str = None) -> None:
         super().__init__(nativeId)
@@ -58,6 +59,8 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
                     needed.append('xfonts-base')
                 if shutil.which('btop') is None:
                     needed.append('btop')
+                if shutil.which('ffmpeg') is None:
+                    needed.append('ffmpeg')
 
                 if needed:
                     needed.sort()
@@ -73,6 +76,16 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
                 except:
                     pass
                 shutil.rmtree(BtopCamera.FILES, ignore_errors=True)
+
+            pid = self.read_ffmpeg_pidfile()
+            if pid:
+                try:
+                    ffmpeg_process = psutil.Process(pid)
+                    for child in ffmpeg_process.children(recursive=True):
+                        if child.name() == 'ffmpeg':
+                            child.terminate()
+                except:
+                    pass
 
             pathlib.Path(BtopCamera.FILES).mkdir(parents=True, exist_ok=True)
         except:
@@ -94,14 +107,29 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
                 await fut
 
         async def run_ffmpeg():
+            await asyncio.sleep(5)
             while True:
-                await run_and_stream_output(f'ffmpeg -loglevel error -f x11grab -framerate 15 -draw_mouse 0 -i :{self.virtual_display_num} -c:v libx264 -pix_fmt yuvj420p -preset ultrafast -bf 0 -g 60 -an -dn -f flv -listen 1 rtmp://localhost:{self.rtmp_port}/stream', env={'XAUTHORITY': BtopCamera.XAUTH})
+                fut, pid = await run_and_stream_output(f'ffmpeg -loglevel error -f x11grab -framerate 15 -draw_mouse 0 -i :{self.virtual_display_num} -c:v libx264 -pix_fmt yuvj420p -preset ultrafast -bf 0 -g 60 -an -dn -f flv -listen 1 rtmp://localhost:{self.rtmp_port}/stream',
+                                                       env={'XAUTHORITY': BtopCamera.XAUTH}, return_pid=True)
+
+                # write pid to file
+                with open(BtopCamera.FFMPEG_PIDFILE, 'w') as f:
+                    f.write(str(pid))
+
+                await fut
 
         asyncio.gather(run_stream(), run_ffmpeg())
 
     def read_pidfile(self) -> int:
         try:
             with open(BtopCamera.PIDFILE) as f:
+                return int(f.read())
+        except:
+            return None
+
+    def read_ffmpeg_pidfile(self) -> int:
+        try:
+            with open(BtopCamera.FFMPEG_PIDFILE) as f:
                 return int(f.read())
         except:
             return None
