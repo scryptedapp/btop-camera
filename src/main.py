@@ -210,32 +210,18 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
                 exe = 'bpytop'
 
             while True:
-                #fut, pid = await run_and_stream_output(f'{BtopCamera.XVFB_RUN} -e /dev/stdout -n {self.virtual_display_num} -s "-screen 0 {self.display_dimensions}x24" -f {BtopCamera.XAUTH} xterm -en UTF-8 -maximized -e {exe}',
-                #                                       env={'PATH': path, "LANG": "en_US.UTF-8"}, return_pid=True)
                 await run_self_cleanup_subprocess(f'{BtopCamera.XVFB_RUN} -n {self.virtual_display_num} -s "-screen 0 {self.display_dimensions}x24" -f {BtopCamera.XAUTH} xterm -en UTF-8 -maximized -e {exe}',
                                                   env={'PATH': path, "LANG": "en_US.UTF-8"}, kill_proc='Xvfb')
 
-                # write pid to file
-                #with open(BtopCamera.PIDFILE, 'w') as f:
-                #    f.write(str(pid))
-
-                #await fut
                 print("Xvfb crashed, restarting in 5s...")
                 await asyncio.sleep(5)
 
         async def run_ffmpeg():
             await asyncio.sleep(5)
             while True:
-                #fut, pid = await run_and_stream_output(f'ffmpeg -loglevel error -f x11grab -framerate 15 -draw_mouse 0 -i :{self.virtual_display_num} -c:v libx264 -pix_fmt yuvj420p -preset ultrafast -bf 0 -g 60 -an -dn -f flv -listen 1 rtmp://localhost:{self.rtmp_port}/stream',
-                #                                       env={'XAUTHORITY': BtopCamera.XAUTH}, return_pid=True)
                 await run_self_cleanup_subprocess(f'ffmpeg -loglevel error -f x11grab -framerate 15 -draw_mouse 0 -i :{self.virtual_display_num} -c:v libx264 -pix_fmt yuvj420p -preset ultrafast -bf 0 -g 60 -an -dn -f flv -listen 1 rtmp://localhost:{self.rtmp_port}/stream',
                                                   env={'XAUTHORITY': BtopCamera.XAUTH}, kill_proc='ffmpeg')
 
-                # write pid to file
-                #with open(BtopCamera.FFMPEG_PIDFILE, 'w') as f:
-                #    f.write(str(pid))
-
-                #await fut
                 print("ffmpeg crashed, restarting in 5s...")
                 await asyncio.sleep(5)
 
