@@ -225,7 +225,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 path = f'/opt/X11/bin:/opt/homebrew/opt/gnu-getopt/bin:/usr/local/opt/gnu-getopt/bin:{path}'
 
             while True:
-                await run_self_cleanup_subprocess(f'{BtopCamera.XVFB_RUN} -n {self.virtual_display_num} -s "-screen 0 {self.display_dimensions}x24" -f {BtopCamera.XAUTH} xterm -en UTF-8 -maximized -e {exe}',
+                await run_self_cleanup_subprocess(f'{BtopCamera.XVFB_RUN} -n {self.virtual_display_num} -s "-screen 0 {self.display_dimensions}x24" -f {BtopCamera.XAUTH} xterm -en UTF-8 -maximized -e {exe} -p {self.btop_preset}',
                                                   env={'PATH': path, "LANG": "en_US.UTF-8"}, kill_proc='Xvfb')
 
                 print("Xvfb crashed, restarting in 5s...")
@@ -274,6 +274,12 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             return self.storage.getItem('rtmp_port') or 4444
         return 4444
 
+    @property
+    def btop_preset(self) -> int:
+        if self.storage:
+            return self.storage.getItem('btop_preset') or 0
+        return 0
+
     async def getSettings(self) -> list[Setting]:
         return [
             {
@@ -296,6 +302,13 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 "description": "The RTMP server port to stream on.",
                 "type": "number",
                 "value": self.rtmp_port,
+            },
+            {
+                "key": "btop_preset",
+                "title": "btop Preset",
+                "description": "The btop preset number to launch. Modify presets in the btop configuration page.",
+                "type": "number",
+                "value": self.btop_preset,
             },
         ]
 
