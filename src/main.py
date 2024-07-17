@@ -13,7 +13,9 @@ from typing import Any, Callable, Dict, Tuple
 import psutil
 
 import scrypted_sdk
-from scrypted_sdk import ScryptedDeviceBase, VideoCamera, ResponseMediaStreamOptions, Settings, Setting, ScryptedInterface, ScryptedMimeTypes
+from scrypted_sdk import ScryptedDeviceBase, VideoCamera, ResponseMediaStreamOptions, RequestMediaStreamOptions, Settings, Setting, ScryptedInterface, ScryptedDeviceType, ScryptedMimeTypes, DeviceProvider, Scriptable, ScriptSource, Readme
+
+import btop_config
 
 
 async def run_and_stream_output(cmd: str, env: Dict[str, str] = {}, return_pid: bool = False) -> Tuple[asyncio.Future, int] | None:
@@ -114,7 +116,7 @@ async def run_self_cleanup_subprocess(cmd: str, env: Dict[str, str] = {}, kill_p
     await read_streams()
 
 
-class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
+class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
     FILES = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'files')
     XAUTH = os.path.join(FILES, 'Xauthority')
     PIDFILE = os.path.join(FILES, 'Xvfb.pid')
@@ -125,6 +127,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
     def __init__(self, nativeId: str = None) -> None:
         super().__init__(nativeId)
 
+        self.btop_config = None
         self.dependencies_installed = asyncio.ensure_future(self.install_dependencies())
         self.stream_initialized = asyncio.ensure_future(self.init_stream())
 
@@ -193,6 +196,16 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
             pathlib.Path(BtopCamera.FILES).mkdir(parents=True, exist_ok=True)
 
             os.chmod(BtopCamera.XVFB_RUN, 0o755)
+
+            await scrypted_sdk.deviceManager.onDeviceDiscovered({
+                "nativeId": "config",
+                "name": ("bpytop" if platform.system() == "Darwin" else "btop") + " Configuration",
+                "type": ScryptedDeviceType.API.value,
+                "interfaces": [
+                    ScryptedInterface.Scriptable.value,
+                    ScryptedInterface.Readme.value,
+                ],
+            })
         except:
             import traceback
             traceback.print_exc()
@@ -201,6 +214,8 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
 
     async def init_stream(self) -> None:
         await self.dependencies_installed
+        config = await self.getDevice('config')
+        await config.config_reconciled
 
         async def run_stream():
             path = os.environ.get('PATH')
@@ -217,7 +232,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
                 await asyncio.sleep(5)
 
         async def run_ffmpeg():
-            await asyncio.sleep(5)
+            await asyncio.sleep(3)
             while True:
                 await run_self_cleanup_subprocess(f'ffmpeg -loglevel error -f x11grab -framerate 15 -draw_mouse 0 -i :{self.virtual_display_num} -c:v libx264 -pix_fmt yuvj420p -preset ultrafast -bf 0 -g 60 -an -dn -f flv -listen 1 rtmp://localhost:{self.rtmp_port}/stream',
                                                   env={'XAUTHORITY': BtopCamera.XAUTH}, kill_proc='ffmpeg')
@@ -306,10 +321,139 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings):
             }
         ]
 
-
-    async def getVideoStream(self, options: scrypted_sdk.RequestMediaStreamOptions = None) -> scrypted_sdk.MediaObject:
+    async def getVideoStream(self, options: RequestMediaStreamOptions = None) -> scrypted_sdk.MediaObject:
         await self.stream_initialized
         return await scrypted_sdk.mediaManager.createMediaObject(str.encode(f'rtmp://localhost:{self.rtmp_port}/stream'), ScryptedMimeTypes.Url.value)
+
+    async def getDevice(self, nativeId: str) -> Any:
+        if nativeId == 'config':
+            if not self.btop_config:
+                if platform.system() == 'Darwin':
+                    self.btop_config = BpytopConfig(nativeId, self)
+                else:
+                    self.btop_config = BtopConfig(nativeId, self)
+            return self.btop_config
+        return None
+
+
+class BtopConfig(ScryptedDeviceBase, Scriptable, Readme):
+    exe = "btop"
+    DEFAULT_CONFIG = btop_config.BTOP_CONFIG
+
+    def __init__(self, nativeId: str, parent: BtopCamera) -> None:
+        super().__init__(nativeId)
+        self.parent = parent
+
+        self.CONFIG = os.path.expanduser(f'~/.config/{self.exe}/{self.exe}.conf')
+        self.HOME_THEMES_DIR = os.path.expanduser(f'~/.config/{self.exe}/themes')
+
+        self.config_reconciled = asyncio.ensure_future(self.reconcile_from_disk())
+        self.themes = []
+
+    async def reconcile_from_disk(self) -> None:
+        await self.parent.dependencies_installed
+
+        try:
+            if not os.path.exists(self.CONFIG):
+                os.makedirs(os.path.dirname(self.CONFIG), exist_ok=True)
+                with open(self.CONFIG, 'w') as f:
+                    f.write(self.DEFAULT_CONFIG)
+            self.print(f"Using config file: {self.CONFIG}")
+
+            with open(self.CONFIG) as f:
+                data = f.read()
+
+            if self.storage.getItem('config') and data != self.config:
+                with open(self.CONFIG, 'w') as f:
+                    f.write(self.config)
+
+            if not self.storage.getItem('config'):
+                self.storage.setItem('config', data)
+
+            btop = shutil.which(self.exe)
+            assert btop is not None
+
+            bin_dir = os.path.dirname(btop)
+            config_dir = os.path.realpath(os.path.join(os.path.dirname(bin_dir), 'share', self.exe, 'themes'))
+            self.print(f"Using themes dir: {config_dir}, {self.HOME_THEMES_DIR}")
+            if os.path.exists(config_dir):
+                self.themes = [
+                    theme.rstrip('.theme')
+                    for theme in os.listdir(config_dir)
+                    if theme.endswith('.theme')
+                ]
+            if os.path.exists(self.HOME_THEMES_DIR):
+                self.themes.extend([
+                    theme.rstrip('.theme')
+                    for theme in os.listdir(self.HOME_THEMES_DIR)
+                    if theme.endswith('.theme')
+                ])
+            self.themes.sort()
+
+            await self.onDeviceEvent(ScryptedInterface.Readme.value, None)
+            await self.onDeviceEvent(ScryptedInterface.Scriptable.value, None)
+        except:
+            import traceback
+            traceback.print_exc()
+
+    @property
+    def config(self) -> str:
+        if self.storage:
+            return self.storage.getItem('config') or self.DEFAULT_CONFIG
+        return self.DEFAULT_CONFIG
+
+    async def eval(self, source: ScriptSource, variables: Any = None) -> Any:
+        raise Exception(f"{self.exe} configuration cannot be evaluated")
+
+    async def loadScripts(self) -> Any:
+        await self.config_reconciled
+
+        return {
+            f"{self.exe}.conf": {
+                "name": f"{self.exe} Configuration",
+                "script": self.config,
+                "language": "ini",
+            }
+        }
+
+    async def saveScript(self, script: ScriptSource) -> None:
+        await self.config_reconciled
+
+        self.storage.setItem('config', script['script'])
+        await self.onDeviceEvent(ScryptedInterface.Scriptable.value, None)
+
+        updated = False
+        with open(self.CONFIG) as f:
+            if f.read() != script['script']:
+                updated = True
+
+        if updated:
+            if not script['script']:
+                os.remove(self.CONFIG)
+            else:
+                with open(self.CONFIG, 'w') as f:
+                    f.write(script['script'])
+
+            self.print("Configuration updated, will restart...")
+            await scrypted_sdk.deviceManager.requestRestart()
+
+    async def getReadmeMarkdown(self) -> str:
+        await self.config_reconciled
+        return f"""
+# `{self.exe}` Configuration
+
+Saving the configuration will trigger a full plugin restart to ensure the stream loads the new configuration.
+
+Available themes:
+{'\n'.join(['- ' + theme for theme in self.themes])}
+"""
+
+class BpytopConfig(BtopConfig):
+    exe = "bpytop"
+    DEFAULT_CONFIG = btop_config.BPYTOP_CONFIG
+
+    def __init__(self, nativeId: str, parent: BtopCamera) -> None:
+        super().__init__(nativeId, parent)
 
 
 def create_scrypted_plugin():

@@ -36,7 +36,11 @@
       "type": "Camera",
       "interfaces": [
          "VideoCamera",
-         "Settings"
+         "Settings",
+         "DeviceProvider"
+      ],
+      "pluginDependencies": [
+         "@scrypted/prebuffer-mixin"
       ]
    },
    "devDependencies": {
