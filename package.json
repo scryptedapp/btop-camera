@@ -7,6 +7,8 @@
       "scrypted",
       "plugin",
       "btop",
+      "bashtop",
+      "bpytop",
       "top",
       "htop",
       "ntop",

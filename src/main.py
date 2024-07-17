@@ -157,11 +157,12 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                     needed = []
                     if shutil.which('ffmpeg') is None:
                         needed.append('ffmpeg')
-                    if shutil.which('bpytop') is None:
-                        needed.append('bpytop')
+                    if shutil.which('btop') is None:
+                        needed.append('btop')
                     if shutil.which('xterm') is None and not os.path.exists('/opt/X11/bin/xterm'):
                         needed.append('xquartz')
-                    if not os.path.exists('/opt/homebrew/opt/gnu-getopt/bin/getopt'):
+                    if not os.path.exists('/opt/homebrew/opt/gnu-getopt/bin/getopt') and \
+                        not os.path.exists('/usr/local/opt/gnu-getopt/bin/getopt'):
                         needed.append('gnu-getopt')
 
                     if needed:
@@ -199,7 +200,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
 
             await scrypted_sdk.deviceManager.onDeviceDiscovered({
                 "nativeId": "config",
-                "name": ("bpytop" if platform.system() == "Darwin" else "btop") + " Configuration",
+                "name": "btop Configuration",
                 "type": ScryptedDeviceType.API.value,
                 "interfaces": [
                     ScryptedInterface.Scriptable.value,
@@ -221,8 +222,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             path = os.environ.get('PATH')
             exe = 'btop'
             if platform.system() == 'Darwin':
-                path = f'/opt/X11/bin:/opt/homebrew/opt/gnu-getopt/bin:{path}'
-                exe = 'bpytop'
+                path = f'/opt/X11/bin:/opt/homebrew/opt/gnu-getopt/bin:/usr/local/opt/gnu-getopt/bin:{path}'
 
             while True:
                 await run_self_cleanup_subprocess(f'{BtopCamera.XVFB_RUN} -n {self.virtual_display_num} -s "-screen 0 {self.display_dimensions}x24" -f {BtopCamera.XAUTH} xterm -en UTF-8 -maximized -e {exe}',
@@ -328,25 +328,19 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
     async def getDevice(self, nativeId: str) -> Any:
         if nativeId == 'config':
             if not self.btop_config:
-                if platform.system() == 'Darwin':
-                    self.btop_config = BpytopConfig(nativeId, self)
-                else:
-                    self.btop_config = BtopConfig(nativeId, self)
+                self.btop_config = BtopConfig(nativeId, self)
             return self.btop_config
         return None
 
 
 class BtopConfig(ScryptedDeviceBase, Scriptable, Readme):
-    exe = "btop"
     DEFAULT_CONFIG = btop_config.BTOP_CONFIG
+    CONFIG = os.path.expanduser(f'~/.config/btop/btop.conf')
+    HOME_THEMES_DIR = os.path.expanduser(f'~/.config/btop/themes')
 
     def __init__(self, nativeId: str, parent: BtopCamera) -> None:
         super().__init__(nativeId)
         self.parent = parent
-
-        self.CONFIG = os.path.expanduser(f'~/.config/{self.exe}/{self.exe}.conf')
-        self.HOME_THEMES_DIR = os.path.expanduser(f'~/.config/{self.exe}/themes')
-
         self.config_reconciled = asyncio.ensure_future(self.reconcile_from_disk())
         self.themes = []
 
@@ -354,38 +348,38 @@ class BtopConfig(ScryptedDeviceBase, Scriptable, Readme):
         await self.parent.dependencies_installed
 
         try:
-            if not os.path.exists(self.CONFIG):
-                os.makedirs(os.path.dirname(self.CONFIG), exist_ok=True)
-                with open(self.CONFIG, 'w') as f:
-                    f.write(self.DEFAULT_CONFIG)
-            self.print(f"Using config file: {self.CONFIG}")
+            if not os.path.exists(BtopConfig.CONFIG):
+                os.makedirs(os.path.dirname(BtopConfig.CONFIG), exist_ok=True)
+                with open(BtopConfig.CONFIG, 'w') as f:
+                    f.write(BtopConfig.DEFAULT_CONFIG)
+            self.print(f"Using config file: {BtopConfig.CONFIG}")
 
-            with open(self.CONFIG) as f:
+            with open(BtopConfig.CONFIG) as f:
                 data = f.read()
 
             if self.storage.getItem('config') and data != self.config:
-                with open(self.CONFIG, 'w') as f:
+                with open(BtopConfig.CONFIG, 'w') as f:
                     f.write(self.config)
 
             if not self.storage.getItem('config'):
                 self.storage.setItem('config', data)
 
-            btop = shutil.which(self.exe)
+            btop = shutil.which('btop')
             assert btop is not None
 
             bin_dir = os.path.dirname(btop)
-            config_dir = os.path.realpath(os.path.join(os.path.dirname(bin_dir), 'share', self.exe, 'themes'))
-            self.print(f"Using themes dir: {config_dir}, {self.HOME_THEMES_DIR}")
+            config_dir = os.path.realpath(os.path.join(os.path.dirname(bin_dir), 'share', 'btop', 'themes'))
+            self.print(f"Using themes dir: {config_dir}, {BtopConfig.HOME_THEMES_DIR}")
             if os.path.exists(config_dir):
                 self.themes = [
-                    theme.rstrip('.theme')
+                    theme.removesuffix('.theme')
                     for theme in os.listdir(config_dir)
                     if theme.endswith('.theme')
                 ]
-            if os.path.exists(self.HOME_THEMES_DIR):
+            if os.path.exists(BtopConfig.HOME_THEMES_DIR):
                 self.themes.extend([
-                    theme.rstrip('.theme')
-                    for theme in os.listdir(self.HOME_THEMES_DIR)
+                    theme.removesuffix('.theme')
+                    for theme in os.listdir(BtopConfig.HOME_THEMES_DIR)
                     if theme.endswith('.theme')
                 ])
             self.themes.sort()
@@ -399,18 +393,18 @@ class BtopConfig(ScryptedDeviceBase, Scriptable, Readme):
     @property
     def config(self) -> str:
         if self.storage:
-            return self.storage.getItem('config') or self.DEFAULT_CONFIG
-        return self.DEFAULT_CONFIG
+            return self.storage.getItem('config') or BtopConfig.DEFAULT_CONFIG
+        return BtopConfig.DEFAULT_CONFIG
 
     async def eval(self, source: ScriptSource, variables: Any = None) -> Any:
-        raise Exception(f"{self.exe} configuration cannot be evaluated")
+        raise Exception("btop configuration cannot be evaluated")
 
     async def loadScripts(self) -> Any:
         await self.config_reconciled
 
         return {
-            f"{self.exe}.conf": {
-                "name": f"{self.exe} Configuration",
+            "btop.conf": {
+                "name": "btop Configuration",
                 "script": self.config,
                 "language": "ini",
             }
@@ -423,15 +417,15 @@ class BtopConfig(ScryptedDeviceBase, Scriptable, Readme):
         await self.onDeviceEvent(ScryptedInterface.Scriptable.value, None)
 
         updated = False
-        with open(self.CONFIG) as f:
+        with open(BtopConfig.CONFIG) as f:
             if f.read() != script['script']:
                 updated = True
 
         if updated:
             if not script['script']:
-                os.remove(self.CONFIG)
+                os.remove(BtopConfig.CONFIG)
             else:
-                with open(self.CONFIG, 'w') as f:
+                with open(BtopConfig.CONFIG, 'w') as f:
                     f.write(script['script'])
 
             self.print("Configuration updated, will restart...")
@@ -440,20 +434,13 @@ class BtopConfig(ScryptedDeviceBase, Scriptable, Readme):
     async def getReadmeMarkdown(self) -> str:
         await self.config_reconciled
         return f"""
-# `{self.exe}` Configuration
+# `btop` Configuration
 
 Saving the configuration will trigger a full plugin restart to ensure the stream loads the new configuration.
 
 Available themes:
 {'\n'.join(['- ' + theme for theme in self.themes])}
 """
-
-class BpytopConfig(BtopConfig):
-    exe = "bpytop"
-    DEFAULT_CONFIG = btop_config.BPYTOP_CONFIG
-
-    def __init__(self, nativeId: str, parent: BtopCamera) -> None:
-        super().__init__(nativeId, parent)
 
 
 def create_scrypted_plugin():
