@@ -128,6 +128,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
         super().__init__(nativeId)
 
         self.btop_config = None
+        self.fonts_cache = None
         self.dependencies_installed = asyncio.ensure_future(self.install_dependencies())
         self.stream_initialized = asyncio.ensure_future(self.init_stream())
 
@@ -136,7 +137,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             installation = os.environ.get('SCRYPTED_INSTALL_ENVIRONMENT')
             if installation in ('docker', 'lxc'):
                 await run_and_stream_output('apt-get update')
-                await run_and_stream_output('apt-get install -y xvfb xterm btop xfonts-base')
+                await run_and_stream_output('apt-get install -y xvfb xterm btop xfonts-base fontconfig')
             else:
                 if platform.system() == 'Linux':
                     needed = []
@@ -224,8 +225,14 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             if platform.system() == 'Darwin':
                 path = f'/opt/X11/bin:/opt/homebrew/opt/gnu-getopt/bin:/usr/local/opt/gnu-getopt/bin:{path}'
 
+            fontselection = ''
+            if self.fonts_supported:
+                font = self.xterm_font
+                if font != 'Default':
+                    fontselection = f'-fa "{font}"'
+
             while True:
-                await run_self_cleanup_subprocess(f'{BtopCamera.XVFB_RUN} -n {self.virtual_display_num} -s "-screen 0 {self.display_dimensions}x24" -f {BtopCamera.XAUTH} xterm -en UTF-8 -maximized -e {exe} -p {self.btop_preset}',
+                await run_self_cleanup_subprocess(f'{BtopCamera.XVFB_RUN} -n {self.virtual_display_num} -s "-screen 0 {self.display_dimensions}x24" -f {BtopCamera.XAUTH} xterm {fontselection} -en UTF-8 -maximized -e {exe} -p {self.btop_preset}',
                                                   env={'PATH': path, "LANG": "en_US.UTF-8"}, kill_proc='Xvfb')
 
                 print("Xvfb crashed, restarting in 5s...")
@@ -280,8 +287,47 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             return self.storage.getItem('btop_preset') or 0
         return 0
 
+    @property
+    def xterm_font(self) -> str:
+        if self.storage:
+            font = self.storage.getItem('xterm_font') or 'Default'
+            if font not in self.list_fonts():
+                return 'Default'
+            return font
+        return 'Default'
+
+    @property
+    def fonts_supported(self) -> bool:
+        installation = os.environ.get('SCRYPTED_INSTALL_ENVIRONMENT')
+        return installation in ('docker', 'lxc')
+
+    def list_fonts(self) -> list[str]:
+        if not self.fonts_supported:
+            return []
+
+        if self.fonts_cache is not None:
+            return self.fonts_cache
+
+        fonts = []
+        try:
+            # list font families with fc-list
+            p = subprocess.Popen(['fc-list', ':', 'family'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            out, err = p.communicate(timeout=10)
+            if p.returncode == 0:
+                for line in out.decode().splitlines():
+                    font = line.strip()
+                    if font:
+                        fonts.append(font)
+        except:
+            print("Could not enumerate fonts with fc-list")
+            pass
+        fonts.sort()
+        fonts = ['Default'] + fonts
+        self.fonts_cache = fonts
+        return fonts
+
     async def getSettings(self) -> list[Setting]:
-        return [
+        settings = [
             {
                 "key": "display_dimensions",
                 "title": "Virtual Display Dimensions",
@@ -311,6 +357,18 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 "value": self.btop_preset,
             },
         ]
+
+        if self.fonts_supported:
+            settings.append({
+                "key": "xterm_font",
+                "title": "Xterm Font",
+                "description": "The Xterm font to use. Monospace fonts are recommended.",
+                "type": "string",
+                "value": self.xterm_font,
+                "choices": self.list_fonts(),
+            })
+
+        return settings
 
     async def putSetting(self, key: str, value: str) -> None:
         self.storage.setItem(key, value)
