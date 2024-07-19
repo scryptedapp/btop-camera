@@ -154,6 +154,9 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                     if shutil.which('ffmpeg') is None:
                         needed.append('ffmpeg')
 
+                    if not self.fonts_supported:
+                        print("Warning: fc-list not found. Changing fonts will not be enabled.")
+
                     if needed:
                         needed.sort()
                         raise Exception(f"Please manually install the following and restart the plugin: {needed}")
@@ -329,7 +332,13 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
     @property
     def fonts_supported(self) -> bool:
         installation = os.environ.get('SCRYPTED_INSTALL_ENVIRONMENT')
-        return installation in ('docker', 'lxc')
+        if installation in ('docker', 'lxc'):
+            return True
+        if platform.system() == 'Linux':
+            return shutil.which('fc-list') is not None
+        if platform.system() == 'Darwin':
+            return os.path.exists('/opt/X11/bin/fc-list')
+        return False
 
     def list_fonts(self) -> list[str]:
         """For best results, ensure that BtopFontManager.fonts_loaded is awaited before calling this function."""
@@ -340,9 +349,10 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             return self.fonts_cache
 
         fonts = []
+        fc_list = 'fc-list' if platform.system() == 'Linux' else '/opt/X11/bin/fc-list'
         try:
             # list font families with fc-list
-            p = subprocess.Popen(['fc-list', ':', 'family'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            p = subprocess.Popen([fc_list, ':', 'family'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             out, err = p.communicate(timeout=10)
             if p.returncode == 0:
                 for line in out.decode().splitlines():
@@ -594,7 +604,8 @@ class DownloaderBase(ScryptedDeviceBase):
 
 
 class BtopFontManager(DownloaderBase, Settings, Readme):
-    LOCAL_FONT_DIR = os.path.expanduser(f'~/.local/share/fonts')
+    FONT_DIR_PATTERN = '~/.local/share/fonts' if platform.system() == 'Linux' else '~/.fonts'
+    LOCAL_FONT_DIR = os.path.expanduser(FONT_DIR_PATTERN)
 
     def __init__(self, nativeId: str | None = None):
         super().__init__(nativeId)
@@ -627,7 +638,7 @@ class BtopFontManager(DownloaderBase, Settings, Readme):
             {
                 "key": "font_urls",
                 "title": "Font URLs",
-                "description": "List of URLs to download fonts from. Fonts will be downloaded to ~/.local/share/fonts.",
+                "description": f"List of URLs to download fonts from. Fonts will be downloaded to {BtopFontManager.FONT_DIR_PATTERN}.",
                 "value": self.font_urls,
                 "multiple": True,
             },
@@ -639,10 +650,10 @@ class BtopFontManager(DownloaderBase, Settings, Readme):
         await scrypted_sdk.deviceManager.requestRestart()
 
     async def getReadmeMarkdown(self) -> str:
-        return """
+        return f"""
 # Font Manager
 
-List fonts to download and install in the local font directory. Fonts will be installed to `~/.local/share/fonts`.
+List fonts to download and install in the local font directory. Fonts will be installed to `{BtopFontManager.FONT_DIR_PATTERN}`.
 """
 
 
