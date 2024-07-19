@@ -130,6 +130,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
 
         self.btop_config = None
         self.fontmanager = None
+        self.thememanager = None
         self.fonts_cache = None
         self.dependencies_installed = asyncio.ensure_future(self.install_dependencies())
         self.stream_initialized = asyncio.ensure_future(self.init_stream())
@@ -207,6 +208,15 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 "type": ScryptedDeviceType.API.value,
                 "interfaces": [
                     ScryptedInterface.Scriptable.value,
+                    ScryptedInterface.Readme.value,
+                ],
+            })
+            await scrypted_sdk.deviceManager.onDeviceDiscovered({
+                "nativeId": "thememanager",
+                "name": "Theme Manager",
+                "type": ScryptedDeviceType.API.value,
+                "interfaces": [
+                    ScryptedInterface.Settings.value,
                     ScryptedInterface.Readme.value,
                 ],
             })
@@ -383,7 +393,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             settings.append({
                 "key": "xterm_font",
                 "title": "Xterm Font",
-                "description": "The Xterm font to use. Monospace fonts are recommended.",
+                "description": "The Xterm font to use. Monospace fonts are recommended. Download additional fonts in the font manager page.",
                 "type": "string",
                 "value": self.xterm_font,
                 "choices": self.list_fonts(),
@@ -426,6 +436,10 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             if not self.fontmanager:
                 self.fontmanager = BtopFontManager(nativeId)
             return self.fontmanager
+        elif nativeId == 'thememanager':
+            if not self.thememanager:
+                self.thememanager = BtopThemeManager(nativeId)
+            return self.thememanager
         return None
 
 
@@ -442,6 +456,9 @@ class BtopConfig(ScryptedDeviceBase, Scriptable, Readme):
 
     async def reconcile_from_disk(self) -> None:
         await self.parent.dependencies_installed
+
+        thememanager = await self.parent.getDevice('thememanager')
+        await thememanager.themes_loaded
 
         try:
             if not os.path.exists(BtopConfig.CONFIG):
@@ -532,19 +549,16 @@ class BtopConfig(ScryptedDeviceBase, Scriptable, Readme):
         return f"""
 # `btop` Configuration
 
-Saving the configuration will trigger a full plugin restart to ensure the stream loads the new configuration.
+Saving the configuration will trigger a full plugin restart to ensure the stream loads the new configuration. Additional themes can be downloaded from the theme manager page.
 
 Available themes:
 {'\n'.join(['- ' + theme for theme in self.themes])}
 """
 
 
-class BtopFontManager(ScryptedDeviceBase, Settings, Readme):
-    LOCAL_FONT_DIR = os.path.expanduser(f'~/.local/share/fonts')
-
+class DownloaderBase(ScryptedDeviceBase):
     def __init__(self, nativeId: str | None = None):
         super().__init__(nativeId)
-        self.fonts_loaded = asyncio.ensure_future(self.load_fonts())
 
     def downloadFile(self, url: str, filename: str):
         try:
@@ -575,6 +589,14 @@ class BtopFontManager(ScryptedDeviceBase, Settings, Readme):
             import traceback
             traceback.print_exc()
             raise
+
+
+class BtopFontManager(DownloaderBase, Settings, Readme):
+    LOCAL_FONT_DIR = os.path.expanduser(f'~/.local/share/fonts')
+
+    def __init__(self, nativeId: str | None = None):
+        super().__init__(nativeId)
+        self.fonts_loaded = asyncio.ensure_future(self.load_fonts())
 
     async def load_fonts(self) -> None:
         os.makedirs(BtopFontManager.LOCAL_FONT_DIR, exist_ok=True)
@@ -620,6 +642,60 @@ class BtopFontManager(ScryptedDeviceBase, Settings, Readme):
 
 List fonts to download and install in the local font directory. Fonts will be installed to `~/.local/share/fonts`.
 """
+
+
+class BtopThemeManager(DownloaderBase, Settings, Readme):
+    LOCAL_THEME_DIR = os.path.expanduser(f'~/.config/btop/themes')
+
+    def __init__(self, nativeId: str | None = None):
+        super().__init__(nativeId)
+        self.themes_loaded = asyncio.ensure_future(self.load_themes())
+
+    async def load_themes(self) -> None:
+        os.makedirs(BtopThemeManager.LOCAL_THEME_DIR, exist_ok=True)
+        try:
+            urls = self.theme_urls
+            for url in urls:
+                filename = url.split('/')[-1]
+                fullpath = self.downloadFile(url, filename)
+                target = os.path.join(BtopThemeManager.LOCAL_THEME_DIR, filename)
+                shutil.copyfile(fullpath, target)
+                self.print("Installed", target)
+        except:
+            import traceback
+            traceback.print_exc()
+
+    @property
+    def theme_urls(self) -> list[str]:
+        if self.storage:
+            urls = self.storage.getItem('theme_urls')
+            if urls:
+                return json.loads(urls)
+        return []
+
+    async def getSettings(self) -> list[Setting]:
+        return [
+            {
+                "key": "theme_urls",
+                "title": "Theme URLs",
+                "description": "List of URLs to download themes from. Themes will be downloaded to ~/.config/btop/themes.",
+                "value": self.theme_urls,
+                "multiple": True,
+            },
+        ]
+
+    async def putSetting(self, key: str, value: str) -> None:
+        self.storage.setItem(key, json.dumps(value))
+        await self.onDeviceEvent(ScryptedInterface.Settings.value, None)
+        await scrypted_sdk.deviceManager.requestRestart()
+
+    async def getReadmeMarkdown(self) -> str:
+        return """
+# Theme Manager
+
+List themes to download and install in the local theme directory. Themes will be installed to `~/.config/btop/themes`.
+"""
+
 
 def create_scrypted_plugin():
     return BtopCamera()
