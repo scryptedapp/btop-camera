@@ -197,7 +197,9 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 except:
                     pass
 
-            shutil.rmtree(BtopCamera.FILES, ignore_errors=True)
+            pathlib.Path(BtopCamera.XAUTH).unlink(missing_ok=True)
+            pathlib.Path(BtopCamera.PIDFILE).unlink(missing_ok=True)
+            pathlib.Path(BtopCamera.FFMPEG_PIDFILE).unlink(missing_ok=True)
             pathlib.Path(BtopCamera.FILES).mkdir(parents=True, exist_ok=True)
 
             os.chmod(BtopCamera.XVFB_RUN, 0o755)
