@@ -8,7 +8,8 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Dict, Tuple
+import urllib.request
 
 import psutil
 
@@ -128,6 +129,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
         super().__init__(nativeId)
 
         self.btop_config = None
+        self.fontmanager = None
         self.fonts_cache = None
         self.dependencies_installed = asyncio.ensure_future(self.install_dependencies())
         self.stream_initialized = asyncio.ensure_future(self.init_stream())
@@ -208,6 +210,16 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                     ScryptedInterface.Readme.value,
                 ],
             })
+            if self.fonts_supported:
+                await scrypted_sdk.deviceManager.onDeviceDiscovered({
+                    "nativeId": "fontmanager",
+                    "name": "Font Manager",
+                    "type": ScryptedDeviceType.API.value,
+                    "interfaces": [
+                        ScryptedInterface.Settings.value,
+                        ScryptedInterface.Readme.value,
+                    ],
+                })
         except:
             import traceback
             traceback.print_exc()
@@ -216,8 +228,13 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
 
     async def init_stream(self) -> None:
         await self.dependencies_installed
+
         config = await self.getDevice('config')
         await config.config_reconciled
+
+        if self.fonts_supported:
+            fontmanager = await self.getDevice('fontmanager')
+            await fontmanager.fonts_loaded
 
         async def run_stream():
             path = os.environ.get('PATH')
@@ -289,6 +306,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
 
     @property
     def xterm_font(self) -> str:
+        """For best results, ensure that BtopFontManager.fonts_loaded is awaited before calling this property."""
         if self.storage:
             font = self.storage.getItem('xterm_font') or 'Default'
             if font not in self.list_fonts():
@@ -302,6 +320,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
         return installation in ('docker', 'lxc')
 
     def list_fonts(self) -> list[str]:
+        """For best results, ensure that BtopFontManager.fonts_loaded is awaited before calling this function."""
         if not self.fonts_supported:
             return []
 
@@ -359,6 +378,8 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
         ]
 
         if self.fonts_supported:
+            fontmanager = await self.getDevice('fontmanager')
+            await fontmanager.fonts_loaded
             settings.append({
                 "key": "xterm_font",
                 "title": "Xterm Font",
@@ -401,6 +422,10 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             if not self.btop_config:
                 self.btop_config = BtopConfig(nativeId, self)
             return self.btop_config
+        elif nativeId == 'fontmanager':
+            if not self.fontmanager:
+                self.fontmanager = BtopFontManager(nativeId)
+            return self.fontmanager
         return None
 
 
@@ -513,6 +538,88 @@ Available themes:
 {'\n'.join(['- ' + theme for theme in self.themes])}
 """
 
+
+class BtopFontManager(ScryptedDeviceBase, Settings, Readme):
+    LOCAL_FONT_DIR = os.path.expanduser(f'~/.local/share/fonts')
+
+    def __init__(self, nativeId: str | None = None):
+        super().__init__(nativeId)
+        self.fonts_loaded = asyncio.ensure_future(self.load_fonts())
+
+    def downloadFile(self, url: str, filename: str):
+        try:
+            filesPath = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'files')
+            fullpath = os.path.join(filesPath, filename)
+            if os.path.isfile(fullpath):
+                return fullpath
+            tmp = fullpath + '.tmp'
+            self.print("Creating directory for", tmp)
+            os.makedirs(os.path.dirname(fullpath), exist_ok=True)
+            self.print("Downloading", url)
+            response = urllib.request.urlopen(url)
+            if response.getcode() < 200 or response.getcode() >= 300:
+                raise Exception(f"Error downloading")
+            read = 0
+            with open(tmp, "wb") as f:
+                while True:
+                    data = response.read(1024 * 1024)
+                    if not data:
+                        break
+                    read += len(data)
+                    self.print("Downloaded", read, "bytes")
+                    f.write(data)
+            os.rename(tmp, fullpath)
+            return fullpath
+        except:
+            self.print("Error downloading", url)
+            import traceback
+            traceback.print_exc()
+            raise
+
+    async def load_fonts(self) -> None:
+        os.makedirs(BtopFontManager.LOCAL_FONT_DIR, exist_ok=True)
+        try:
+            urls = self.font_urls
+            for url in urls:
+                filename = url.split('/')[-1]
+                fullpath = self.downloadFile(url, filename)
+                target = os.path.join(BtopFontManager.LOCAL_FONT_DIR, filename)
+                shutil.copyfile(fullpath, target)
+                self.print("Installed", target)
+        except:
+            import traceback
+            traceback.print_exc()
+
+    @property
+    def font_urls(self) -> list[str]:
+        if self.storage:
+            urls = self.storage.getItem('font_urls')
+            if urls:
+                return json.loads(urls)
+        return []
+
+    async def getSettings(self) -> list[Setting]:
+        return [
+            {
+                "key": "font_urls",
+                "title": "Font URLs",
+                "description": "List of URLs to download fonts from. Fonts will be downloaded to ~/.local/share/fonts.",
+                "value": self.font_urls,
+                "multiple": True,
+            },
+        ]
+
+    async def putSetting(self, key: str, value: str) -> None:
+        self.storage.setItem(key, json.dumps(value))
+        await self.onDeviceEvent(ScryptedInterface.Settings.value, None)
+        await scrypted_sdk.deviceManager.requestRestart()
+
+    async def getReadmeMarkdown(self) -> str:
+        return """
+# Font Manager
+
+List fonts to download and install in the local font directory. Fonts will be installed to `~/.local/share/fonts`.
+"""
 
 def create_scrypted_plugin():
     return BtopCamera()
