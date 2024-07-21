@@ -10,4 +10,4 @@ This plugin provides a virtual camera device that continuously streams output fr
 
 ## Advanced usage: Hardware-accelerated encoding
 
-By default, this plugin requests that Rebroadcast use the FFmpeg arguments `-c:v libx264 -preset -ultrafast -bf 0 -r 15 -g 60` for encoding H264 video from the virtual X11 display. To enable hardware acceleration, replace `libx264` with the hardware-accelerated encoder for your platform.
+By default, this plugin requests that the Rebroadcast plugin use the FFmpeg arguments `-c:v libx264 -preset -ultrafast -bf 0 -r 15 -g 60` for encoding H264 video from the virtual X11 display. To enable hardware acceleration, copy the above into the "FFmpeg Output Prefix" settings for the stream, replacing `libx264` with the hardware-accelerated encoder for your platform.
