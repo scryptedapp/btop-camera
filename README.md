@@ -2,7 +2,7 @@
 
 **This plugin will only work on Linux and MacOS!** It will perform best in a Docker or LXC Scrypted installation, since dependencies will be automatically installed. In this device's Extensions list, the Snapshot plugin should be enabled *after* the Rebroadcast plugin.
 
-For local Scrypted installs on **Linux**, several system packages must be manually installed: `xvfb`, `xterm`, `xfonts-base`, `btop`. `fontconfig` is required for changing fonts.
+For local Scrypted installs on **Linux**, several system packages must be manually installed: `xvfb`, `xterm`, `xfonts-base`, `btop`. The optional dependency `fontconfig` can be installed to enable changing fonts.
 
 For local Scrypted installs on **MacOS**, several brew packages must be manually installed: `xquartz`, `gnu-getopt`, `ffmpeg`, `btop`.
 

@@ -151,8 +151,6 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                         needed.append('xfonts-base')
                     if shutil.which('btop') is None:
                         needed.append('btop')
-                    if shutil.which('ffmpeg') is None:
-                        needed.append('ffmpeg')
 
                     if not self.fonts_supported:
                         print("Warning: fc-list not found. Changing fonts will not be enabled.")
@@ -162,7 +160,8 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                         raise Exception(f"Please manually install the following and restart the plugin: {needed}")
                 elif platform.system() == 'Darwin':
                     needed = []
-                    if shutil.which('ffmpeg') is None:
+                    if not os.path.exists('/usr/local/bin/ffmpeg') and \
+                        not os.path.exists('/opt/homebrew/bin/ffmpeg'):
                         needed.append('ffmpeg')
                     if shutil.which('btop') is None:
                         needed.append('btop')
@@ -434,6 +433,13 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 "-g", "60",
             ]
         }
+
+        if platform.system() == 'Darwin':
+            if os.path.exists('/opt/homebrew/bin/ffmpeg'):
+                ffmpeg_input['ffmpegPath'] = '/opt/homebrew/bin/ffmpeg'
+            elif os.path.exists('/usr/local/bin/ffmpeg'):
+                ffmpeg_input['ffmpegPath'] = '/usr/local/bin/ffmpeg'
+
         return await scrypted_sdk.mediaManager.createFFmpegMediaObject(ffmpeg_input)
 
     async def getDevice(self, nativeId: str) -> Any:
