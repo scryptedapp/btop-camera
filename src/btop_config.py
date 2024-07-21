@@ -67,7 +67,7 @@ proc_tree = False
 proc_colors = True
 
 #* Use a darkening gradient in the process list.
-proc_gradient = True
+proc_gradient = False
 
 #* If process cpu usage should be of the core it's running on or usage of the total available cpu power.
 proc_per_core = True
@@ -127,7 +127,7 @@ show_cpu_freq = True
 
 #* Draw a clock at top of screen, formatting according to strftime, empty string to disable.
 #* Special formatting: /host = hostname | /user = username | /uptime = system uptime
-clock_format = "%H:%M"
+clock_format = "%H:%M:%S"
 
 #* Update main ui in background when menus are showing, set this to false if the menus is flickering too much for comfort.
 background_update = True
@@ -137,7 +137,7 @@ custom_cpu_name = ""
 
 #* Optional filter for shown disks, should be full path of a mountpoint, separate multiple values with whitespace " ".
 #* Begin line with "exclude=" to change to exclude filter, otherwise defaults to "most include" filter. Example: disks_filter="exclude=/boot /home/user".
-disks_filter = "exclude=/boot"
+disks_filter = "/ /nvr"
 
 #* Show graphs instead of meters for memory values.
 mem_graphs = True
@@ -158,7 +158,7 @@ swap_disk = True
 show_disks = True
 
 #* Filter out non physical disks. Set this to False to include network disks, RAM disks and similar.
-only_physical = True
+only_physical = False
 
 #* Read disks list from /etc/fstab. This also disables only_physical.
 use_fstab = False
@@ -191,7 +191,7 @@ net_auto = True
 net_sync = False
 
 #* Starts with the Network Interface specified here.
-net_iface = "br0"
+net_iface = "eth0"
 
 #* Show battery stats in top right if battery is present.
 show_battery = True
@@ -202,4 +202,4 @@ selected_battery = "Auto"
 #* Set loglevel for "~/.config/btop/btop.log" levels are: "ERROR" "WARNING" "INFO" "DEBUG".
 #* The level set includes all lower levels, i.e. "DEBUG" will show all logging info.
 log_level = "DEBUG"
-"""
+""".strip()
