@@ -270,16 +270,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 print("Xvfb crashed, restarting in 5s...")
                 await asyncio.sleep(5)
 
-        async def run_ffmpeg():
-            await asyncio.sleep(3)
-            while True:
-                await run_self_cleanup_subprocess(f'ffmpeg -loglevel error -f x11grab -framerate 15 -draw_mouse 0 -i :{self.virtual_display_num} -c:v libx264 -pix_fmt yuvj420p -preset ultrafast -bf 0 -g 60 -an -dn -f flv -listen 1 rtmp://localhost:{self.rtmp_port}/stream',
-                                                  env={'XAUTHORITY': BtopCamera.XAUTH}, kill_proc='ffmpeg')
-
-                print("ffmpeg crashed, restarting in 5s...")
-                await asyncio.sleep(5)
-
-        asyncio.gather(run_stream(), run_ffmpeg())
+        asyncio.create_task(run_stream())
 
     def read_pidfile(self) -> int:
         try:
@@ -306,12 +297,6 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
         if self.storage:
             return self.storage.getItem('display_dimensions') or '1024x720'
         return '1024x720'
-
-    @property
-    def rtmp_port(self) -> int:
-        if self.storage:
-            return self.storage.getItem('rtmp_port') or 4444
-        return 4444
 
     @property
     def btop_preset(self) -> int:
@@ -384,13 +369,6 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 "value": self.virtual_display_num,
             },
             {
-                "key": "rtmp_port",
-                "title": "RTMP Port",
-                "description": "The RTMP server port to stream on.",
-                "type": "number",
-                "value": self.rtmp_port,
-            },
-            {
                 "key": "btop_preset",
                 "title": "btop Preset",
                 "description": "The btop preset number to launch. Modify presets in the btop configuration page.",
@@ -424,9 +402,9 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             {
                 "id": "default",
                 "name": "Virtual Display",
-                "container": "rtmp",
+                "container": "x11grab",
                 "video": {
-                    "codec": "h264",
+                    "codec": "rawvideo",
                 },
                 "audio": None,
                 "source": "local",
@@ -437,7 +415,26 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
 
     async def getVideoStream(self, options: RequestMediaStreamOptions = None) -> scrypted_sdk.MediaObject:
         await self.stream_initialized
-        return await scrypted_sdk.mediaManager.createMediaObject(str.encode(f'rtmp://localhost:{self.rtmp_port}/stream'), ScryptedMimeTypes.Url.value)
+
+        ffmpeg_input = {
+            "inputArguments": [
+                "-f", "x11grab",
+                "-framerate", "15",
+                "-draw_mouse", "0",
+                "-i", f":{self.virtual_display_num}",
+            ],
+            "env": {
+                "XAUTHORITY": BtopCamera.XAUTH,
+            },
+            "h264EncoderArguments": [
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-bf", "0",
+                "-r", "15",
+                "-g", "60",
+            ]
+        }
+        return await scrypted_sdk.mediaManager.createFFmpegMediaObject(ffmpeg_input)
 
     async def getDevice(self, nativeId: str) -> Any:
         if nativeId == 'config':
