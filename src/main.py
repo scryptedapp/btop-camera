@@ -407,7 +407,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                     "codec": "rawvideo",
                 },
                 "audio": None,
-                "source": "local",
+                "source": "synthetic",
                 "tool": "ffmpeg",
                 "userConfigurable": False,
             }
