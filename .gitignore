@@ -3,3 +3,5 @@ out/
 node_modules/
 dist/
 .venv
+fs/ffmpeg_in_wsl.com
+cosmo-bin

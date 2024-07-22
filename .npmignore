@@ -3,6 +3,7 @@ out/
 node_modules/
 *.map
 fs
+cosmo-bin
 src
 .vscode
 dist/*.js

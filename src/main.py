@@ -3,15 +3,11 @@ import json
 import os
 import pathlib
 import platform
-import signal
 import shutil
 import subprocess
 import sys
-import time
 from typing import Any, Dict, Tuple
 import urllib.request
-
-import psutil
 
 import scrypted_sdk
 from scrypted_sdk import ScryptedDeviceBase, VideoCamera, ResponseMediaStreamOptions, RequestMediaStreamOptions, Settings, Setting, ScryptedInterface, ScryptedDeviceType, ScryptedMimeTypes, DeviceProvider, Scriptable, ScriptSource, Readme
@@ -37,72 +33,31 @@ async def run_and_stream_output(cmd: str, env: Dict[str, str] = {}, return_pid: 
     await read_streams()
 
 
-def multiprocess_main():
-    cmd = sys.argv[1].strip()
-    env = sys.argv[2].strip()
-    kill_proc = sys.argv[3].strip()
-
-    env = json.loads(env)
-    if kill_proc == 'None':
-        kill_proc = None
-
-    parent = psutil.Process(os.getppid())
-
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-
-    name = cmd.split()[0]
-    print(f"{name} starting")
-    sp = subprocess.Popen(cmd, shell=True, env=dict(os.environ, **env))
-
-    with open(os.path.join(BtopCamera.FILES, f"{kill_proc}.pid"), 'w') as f:
-        f.write(str(sp.pid))
-
-    while parent.is_running():
-        # check if the subprocess is still alive, if not then exit
-        if sp.poll() is not None:
-            break
-        time.sleep(3)
-
-    try:
-        print(f"{name} exiting")
-    except:
-        # in case stdout was closed
-        pass
-
-    if kill_proc:
-        try:
-            p = psutil.Process(sp.pid)
-            for child in p.children(recursive=True):
-                if child.name() == kill_proc:
-                    try:
-                        child.kill()
-                    except:
-                        pass
-            p.kill()
-        except:
-            pass
-
-    sp.terminate()
-    sp.wait()
-
-    try:
-        print(f"{name} exited")
-    except:
-        # in case stdout was closed
-        pass
-
-
 async def run_self_cleanup_subprocess(cmd: str, env: Dict[str, str] = {}, kill_proc: str = None) -> None:
-    exe = sys.executable
-    args = [
-        BtopCamera.THIS_FILE,
-        cmd,
-        json.dumps(env),
-        kill_proc or 'None',
-    ]
+    """Launch an instance of Python which monitors the subprocess and kills it if the parent process dies."""
+    if platform.system() != "Windows":
+        exe = sys.executable
+        args = [
+            BtopCamera.RUN_SEPARATELY_SCRIPT,
+            cmd,
+            json.dumps(env),
+            kill_proc or 'None',
+            'None'
+        ]
+    else:
+        exe = shutil.which('wsl')
+        args = [
+            'python3',
+            BtopCamera.RUN_SEPARATELY_SCRIPT,
+            cmd,
+            json.dumps(env),
+            kill_proc or 'None',
+            BtopCamera.MONITOR_FILE,
+        ]
 
-    p = await asyncio.create_subprocess_exec(exe, *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True)
+    script_env = os.environ.copy()
+    script_env['SCRYPTED_BTOP_PIDFILE_DIR'] = BtopCamera.FILES
+    p = await asyncio.create_subprocess_exec(exe, *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True, env=script_env)
 
     async def read_streams():
         async def stream_stdout():
@@ -117,13 +72,73 @@ async def run_self_cleanup_subprocess(cmd: str, env: Dict[str, str] = {}, kill_p
     await read_streams()
 
 
+async def run_cleanup_subprocess(kill_proc: str) -> None:
+    """Launches an instance of Python to clean up dangling processes from a previous plugin instance."""
+    if platform.system() != "Windows":
+        exe = sys.executable
+        args = [
+            BtopCamera.CLEANUP_SEPARATELY_SCRIPT,
+            kill_proc,
+        ]
+    else:
+        exe = shutil.which('wsl')
+        args = [
+            'python3',
+            BtopCamera.CLEANUP_SEPARATELY_SCRIPT,
+            kill_proc,
+        ]
+
+    script_env = os.environ.copy()
+    script_env['SCRYPTED_BTOP_PIDFILE_DIR'] = BtopCamera.FILES
+    p = await asyncio.create_subprocess_exec(exe, *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True, env=script_env)
+
+    async def read_streams():
+        async def stream_stdout():
+            async for line in p.stdout:
+                print(line.decode('utf-8'))
+        async def stream_stderr():
+            async for line in p.stderr:
+                print(line.decode('utf-8'))
+
+        await asyncio.gather(stream_stdout(), stream_stderr(), p.wait())
+
+    await read_streams()
+
+
+def copy_file_to(path: str, dest: str, make_executable: bool = False) -> None:
+    if platform.system() != "Windows":
+        shutil.copyfile(path, dest)
+        if make_executable:
+            os.chmod(dest, 0o755)
+    else:
+        # read file
+        with open(path, 'rb') as f:
+            data = f.read()
+
+        # launch tee as subprocess
+        exe = shutil.which('wsl')
+        args = [
+            'tee', dest
+        ]
+        subprocess.Popen([exe, *args], stdin=subprocess.PIPE, stdout=subprocess.PIPE, shell=True).communicate(data)
+
+        if make_executable:
+            # make executable
+            subprocess.Popen(["wsl", "chmod", "755", dest], shell=True).communicate()
+
+
 class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
-    FILES = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'files')
-    XAUTH = os.path.join(FILES, 'Xauthority')
-    PIDFILE = os.path.join(FILES, 'Xvfb.pid')
-    FFMPEG_PIDFILE = os.path.join(FILES, 'ffmpeg.pid')
-    XVFB_RUN = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'zip', 'unzipped', 'fs', 'xvfb-run')
-    THIS_FILE = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'zip', 'unzipped', 'main.py')
+    FILES = "/tmp/.scrypted_btop" if platform.system() == "Windows" else os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'files')
+    XAUTH = f"{FILES}/Xauthority"
+    XVFB_RUN = f"{FILES}/xvfb-run"
+    RUN_SEPARATELY_SCRIPT = f"{FILES}/run_separately.py"
+    CLEANUP_SEPARATELY_SCRIPT = f"{FILES}/cleanup_separately.py"
+    MONITOR_FILE = f"{FILES}/monitor"
+
+    FFMPEG_IN_WSL = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'zip', 'unzipped', 'fs', 'ffmpeg_in_wsl.com')
+    XVFB_RUN_SRC = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'zip', 'unzipped', 'fs', 'xvfb-run')
+    RUN_SEPARATELY_SCRIPT_SRC = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'zip', 'unzipped', 'run_separately.py')
+    CLEANUP_SEPARATELY_SCRIPT_SRC = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'zip', 'unzipped', 'cleanup_separately.py')
 
     def __init__(self, nativeId: str = None) -> None:
         super().__init__(nativeId)
@@ -144,8 +159,8 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             else:
                 if platform.system() == 'Linux':
                     needed = []
-                    if shutil.which('xvfb-run') is None:
-                        needed.append('xvfb-run')
+                    if shutil.which('Xvfb') is None:
+                        needed.append('xvfb')
                     if shutil.which('xterm') is None:
                         needed.append('xterm')
                         needed.append('xfonts-base')
@@ -174,37 +189,61 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                     if needed:
                         needed.sort()
                         raise Exception(f"Please manually install the following and restart the plugin: {needed}")
+                elif platform.system() == 'Windows':
+                    if shutil.which('wsl') is None:
+                        raise Exception("Please install WSL and restart the plugin.")
+
+                    def check_exists_in_wsl(exe):
+                        try:
+                            subprocess.check_output(["wsl", "which", exe], shell=True).decode().strip()
+                            return True
+                        except:
+                            return False
+
+                    needed = []
+                    if not check_exists_in_wsl('ffmpeg'):
+                        needed.append('ffmpeg')
+                    if not check_exists_in_wsl('btop'):
+                        needed.append('btop')
+                    if not check_exists_in_wsl('xterm'):
+                        needed.append('xterm')
+                        needed.append('xfonts-base')
+                    if not check_exists_in_wsl('Xvfb'):
+                        needed.append('xvfb')
+                    if not check_exists_in_wsl('wslpath'):
+                        needed.append('wslpath')
+                    if not check_exists_in_wsl('ip'):
+                        needed.append('ip')
+                    if not check_exists_in_wsl('tee'):
+                        needed.append('coreutils')
+
+                    if not check_exists_in_wsl('fc-list'):
+                        print("Warning: fc-list not found in WSL. Changing fonts will not be enabled.")
+
+                    if needed:
+                        needed.sort()
+                        raise Exception(f"Please manually install the following in WSL and restart the plugin: {needed}")
                 else:
                     raise Exception("This plugin only supports Linux and MacOS.")
 
-            pid = self.read_pidfile()
-            if pid:
-                try:
-                    xvfb_run_process = psutil.Process(pid)
-                    for child in xvfb_run_process.children(recursive=True):
-                        if child.name() == 'Xvfb':
-                            child.kill()
-                    xvfb_run_process.kill()
-                except:
-                    pass
+            try:
+                await run_cleanup_subprocess('Xvfb')
+            except:
+                pass
+            try:
+                await run_cleanup_subprocess('ffmpeg')
+            except:
+                pass
 
-            pid = self.read_ffmpeg_pidfile()
-            if pid:
-                try:
-                    ffmpeg_process = psutil.Process(pid)
-                    for child in ffmpeg_process.children(recursive=True):
-                        if child.name() == 'ffmpeg':
-                            child.kill()
-                    ffmpeg_process.kill()
-                except:
-                    pass
-
-            pathlib.Path(BtopCamera.XAUTH).unlink(missing_ok=True)
-            pathlib.Path(BtopCamera.PIDFILE).unlink(missing_ok=True)
-            pathlib.Path(BtopCamera.FFMPEG_PIDFILE).unlink(missing_ok=True)
-            pathlib.Path(BtopCamera.FILES).mkdir(parents=True, exist_ok=True)
-
-            os.chmod(BtopCamera.XVFB_RUN, 0o755)
+            if platform.system() != "Windows":
+                pathlib.Path(BtopCamera.XAUTH).unlink(missing_ok=True)
+                pathlib.Path(BtopCamera.FILES).mkdir(parents=True, exist_ok=True)
+            else:
+                subprocess.Popen(["wsl", "rm", "-rf", BtopCamera.FILES], shell=True).communicate()
+                subprocess.Popen(["wsl", "mkdir", "-p", BtopCamera.FILES], shell=True).communicate()
+            copy_file_to(BtopCamera.XVFB_RUN_SRC, BtopCamera.XVFB_RUN, make_executable=True)
+            copy_file_to(BtopCamera.RUN_SEPARATELY_SCRIPT_SRC, BtopCamera.RUN_SEPARATELY_SCRIPT)
+            copy_file_to(BtopCamera.CLEANUP_SEPARATELY_SCRIPT_SRC, BtopCamera.CLEANUP_SEPARATELY_SCRIPT)
 
             await scrypted_sdk.deviceManager.onDeviceDiscovered({
                 "nativeId": "config",
@@ -234,6 +273,16 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                         ScryptedInterface.Readme.value,
                     ],
                 })
+
+            if platform.system() == "Windows":
+                async def periodic_monitor():
+                    while True:
+                        try:
+                            subprocess.Popen(["wsl", "touch", BtopCamera.MONITOR_FILE], shell=True).communicate()
+                        except:
+                            pass
+                        await asyncio.sleep(3)
+                asyncio.create_task(periodic_monitor())
         except:
             import traceback
             traceback.print_exc()
@@ -251,10 +300,15 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             await fontmanager.fonts_loaded
 
         async def run_stream():
-            path = os.environ.get('PATH')
             exe = 'btop'
+            env = {
+                "LANG": "en_US.UTF-8",
+            }
+
             if platform.system() == 'Darwin':
+                path = os.environ.get('PATH')
                 path = f'/opt/X11/bin:/opt/homebrew/opt/gnu-getopt/bin:/usr/local/opt/gnu-getopt/bin:{path}'
+                env['PATH'] = path
 
             fontselection = ''
             if self.fonts_supported:
@@ -264,26 +318,12 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
 
             while True:
                 await run_self_cleanup_subprocess(f'{BtopCamera.XVFB_RUN} -n {self.virtual_display_num} -s "-screen 0 {self.display_dimensions}x24" -f {BtopCamera.XAUTH} xterm {fontselection} -en UTF-8 -maximized -e {exe} -p {self.btop_preset}',
-                                                  env={'PATH': path, "LANG": "en_US.UTF-8"}, kill_proc='Xvfb')
+                                                  env=env, kill_proc='Xvfb')
 
                 print("Xvfb crashed, restarting in 5s...")
                 await asyncio.sleep(5)
 
         asyncio.create_task(run_stream())
-
-    def read_pidfile(self) -> int:
-        try:
-            with open(BtopCamera.PIDFILE) as f:
-                return int(f.read())
-        except:
-            return None
-
-    def read_ffmpeg_pidfile(self) -> int:
-        try:
-            with open(BtopCamera.FFMPEG_PIDFILE) as f:
-                return int(f.read())
-        except:
-            return None
 
     @property
     def virtual_display_num(self) -> int:
@@ -322,6 +362,12 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             return shutil.which('fc-list') is not None
         if platform.system() == 'Darwin':
             return os.path.exists('/opt/X11/bin/fc-list')
+        if platform.system() == 'Windows':
+            try:
+                subprocess.check_output(["wsl", "which", "fc-list"], shell=True).decode().strip()
+                return True
+            except:
+                pass
         return False
 
     def list_fonts(self) -> list[str]:
@@ -333,10 +379,11 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             return self.fonts_cache
 
         fonts = []
-        fc_list = 'fc-list' if platform.system() == 'Linux' else '/opt/X11/bin/fc-list'
+        fc_list_cmd = ['wsl', 'fc-list', ':', 'family'] if platform.system() == 'Windows' else \
+            ['fc-list' if platform.system() == 'Linux' else '/opt/X11/bin/fc-list', ':', 'family']
         try:
             # list font families with fc-list
-            p = subprocess.Popen([fc_list, ':', 'family'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            p = subprocess.Popen(fc_list_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             out, err = p.communicate(timeout=10)
             if p.returncode == 0:
                 for line in out.decode().splitlines():
@@ -439,6 +486,8 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 ffmpeg_input['ffmpegPath'] = '/opt/homebrew/bin/ffmpeg'
             elif os.path.exists('/usr/local/bin/ffmpeg'):
                 ffmpeg_input['ffmpegPath'] = '/usr/local/bin/ffmpeg'
+        elif platform.system() == 'Windows':
+            ffmpeg_input['ffmpegPath'] = BtopCamera.FFMPEG_IN_WSL
 
         return await scrypted_sdk.mediaManager.createFFmpegMediaObject(ffmpeg_input)
 
@@ -715,6 +764,3 @@ List themes to download and install in the local theme directory. Themes will be
 
 def create_scrypted_plugin():
     return BtopCamera()
-
-if __name__ == "__main__":
-    multiprocess_main()
