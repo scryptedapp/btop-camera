@@ -1,10 +1,10 @@
 # `btop` Virtual Camera
 
-This plugin will perform best in a Docker or LXC Scrypted installation, since dependencies will be automatically installed.
+This plugin will perform best in a Docker or LXC Scrypted installation, since dependencies will be automatically installed. The `@scrypted/btop` plugin is required to download a compatible version of `btop`.
 
-For local Scrypted installs on **Linux**, several system packages must be manually installed: `xvfb`, `xterm`, `xfonts-base`, `btop`. The optional dependency `fontconfig` can be installed to enable changing fonts.
+For local Scrypted installs on **Linux**, several system packages must be manually installed: `xvfb`, `xterm`, `xfonts-base`. The optional dependency `fontconfig` can be installed to enable changing fonts.
 
-For local Scrypted installs on **MacOS**, several brew packages must be manually installed: `xquartz`, `gnu-getopt`, `ffmpeg`, `btop`.
+For local Scrypted installs on **MacOS**, several brew packages must be manually installed: `xquartz`, `gnu-getopt`, `ffmpeg`.
 
 For local Scrypted installs on **Windows**, Windows Subsystem for Linux (WSL) is required. Several packages must be manually installed *within* WSL: `xvfb`, `xterm`, `xfonts-base`, `ffmpeg`. The optional dependency `fontconfig` can be installed to enable changing fonts.
 
