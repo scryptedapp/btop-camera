@@ -6,6 +6,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import types
 from typing import Any, Dict, Tuple
 import urllib.request
 
@@ -13,6 +14,33 @@ import scrypted_sdk
 from scrypted_sdk import ScryptedDeviceBase, VideoCamera, ResponseMediaStreamOptions, RequestMediaStreamOptions, Settings, Setting, ScryptedInterface, ScryptedDeviceType, ScryptedMimeTypes, DeviceProvider, Scriptable, ScriptSource, Readme
 
 import btop_config
+
+
+# patch SystemManager.getDeviceByName
+def getDeviceByName(self, name: str) -> scrypted_sdk.ScryptedDevice:
+    for check in self.systemState:
+        state = self.systemState.get(check, None)
+        if not state:
+            continue
+        checkInterfaces = state.get('interfaces', None)
+        if not checkInterfaces:
+            continue
+        interfaces = checkInterfaces.get('value', [])
+        if ScryptedInterface.ScryptedPlugin.value in interfaces:
+            checkPluginId = state.get('pluginId', None)
+            if not checkPluginId:
+                continue
+            pluginId = checkPluginId.get('value', None)
+            if not pluginId:
+                continue
+            if pluginId == name:
+                return self.getDeviceById(check)
+        checkName = state.get('name', None)
+        if not checkName:
+            continue
+        if checkName.get('value', None) == name:
+            return self.getDeviceById(check)
+scrypted_sdk.systemManager.getDeviceByName = types.MethodType(getDeviceByName, scrypted_sdk.systemManager)
 
 
 async def run_and_stream_output(cmd: str, env: Dict[str, str] = {}, return_pid: bool = False) -> Tuple[asyncio.Future, int] | None:
@@ -143,6 +171,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
     def __init__(self, nativeId: str = None) -> None:
         super().__init__(nativeId)
 
+        self.btop = asyncio.ensure_future(self.load_btop_exe())
         self.btop_config = None
         self.fontmanager = None
         self.thememanager = None
@@ -150,12 +179,28 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
         self.dependencies_installed = asyncio.ensure_future(self.install_dependencies())
         self.stream_initialized = asyncio.ensure_future(self.init_stream())
 
+    async def load_btop_exe(self) -> str:
+        try:
+            btop_plugin = scrypted_sdk.systemManager.getDeviceByName('@scrypted/btop')
+            if not btop_plugin:
+                raise Exception("Please install the @scrypted/btop plugin.")
+            btop = await btop_plugin.getDevice("btop-executable")
+            return btop
+        except:
+            import traceback
+            traceback.print_exc()
+            await scrypted_sdk.deviceManager.requestRestart()
+            await asyncio.sleep(3600)
+
     async def install_dependencies(self) -> None:
         try:
+            btop = await self.btop
+            print("Using btop executable:", btop)
+
             installation = os.environ.get('SCRYPTED_INSTALL_ENVIRONMENT')
             if installation in ('docker', 'lxc'):
                 await run_and_stream_output('apt-get update')
-                await run_and_stream_output('apt-get install -y xvfb xterm btop xfonts-base fontconfig')
+                await run_and_stream_output('apt-get install -y xvfb xterm xfonts-base fontconfig')
             else:
                 if platform.system() == 'Linux':
                     needed = []
@@ -164,8 +209,6 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                     if shutil.which('xterm') is None:
                         needed.append('xterm')
                         needed.append('xfonts-base')
-                    if shutil.which('btop') is None:
-                        needed.append('btop')
 
                     if not self.fonts_supported:
                         print("Warning: fc-list not found. Changing fonts will not be enabled.")
@@ -178,8 +221,6 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                     if not os.path.exists('/usr/local/bin/ffmpeg') and \
                         not os.path.exists('/opt/homebrew/bin/ffmpeg'):
                         needed.append('ffmpeg')
-                    if shutil.which('btop') is None:
-                        needed.append('btop')
                     if shutil.which('xterm') is None and not os.path.exists('/opt/X11/bin/xterm'):
                         needed.append('xquartz')
                     if not os.path.exists('/opt/homebrew/opt/gnu-getopt/bin/getopt') and \
@@ -203,8 +244,6 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                     needed = []
                     if not check_exists_in_wsl('ffmpeg'):
                         needed.append('ffmpeg')
-                    if not check_exists_in_wsl('btop'):
-                        needed.append('btop')
                     if not check_exists_in_wsl('xterm'):
                         needed.append('xterm')
                         needed.append('xfonts-base')
@@ -300,10 +339,18 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             await fontmanager.fonts_loaded
 
         async def run_stream():
-            exe = 'btop'
+            exe = await self.btop
             env = {
                 "LANG": "en_US.UTF-8",
             }
+
+            if not exe:
+                raise Exception("btop executable not found, cannot start stream.")
+
+            if platform.system() == "Windows":
+                # translate with wslpath
+                exe = subprocess.check_output(["wsl", "wslpath", exe], shell=True).decode().strip()
+                print("Translated to WSL path:", exe)
 
             if platform.system() == 'Darwin':
                 path = os.environ.get('PATH')
@@ -317,7 +364,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                     fontselection = f'-fa "{font}"'
 
             while True:
-                await run_self_cleanup_subprocess(f'{BtopCamera.XVFB_RUN} -n {self.virtual_display_num} -s "-screen 0 {self.display_dimensions}x24" -f {BtopCamera.XAUTH} xterm {fontselection} -en UTF-8 -maximized -e {exe} -p {self.btop_preset}',
+                await run_self_cleanup_subprocess(f'{BtopCamera.XVFB_RUN} -n {self.virtual_display_num} -s "-screen 0 {self.display_dimensions}x24" -f {BtopCamera.XAUTH} xterm {fontselection} -en UTF-8 -maximized -e "{exe}" -p {self.btop_preset}',
                                                   env=env, kill_proc='Xvfb')
 
                 print("Xvfb crashed, restarting in 5s...")
@@ -502,7 +549,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             return self.fontmanager
         elif nativeId == 'thememanager':
             if not self.thememanager:
-                self.thememanager = BtopThemeManager(nativeId)
+                self.thememanager = BtopThemeManager(nativeId, self)
             return self.thememanager
         return None
 
@@ -515,8 +562,19 @@ class BtopConfig(ScryptedDeviceBase, Scriptable, Readme):
     def __init__(self, nativeId: str, parent: BtopCamera) -> None:
         super().__init__(nativeId)
         self.parent = parent
+        self.config_path = asyncio.ensure_future(self.find_config())
         self.config_reconciled = asyncio.ensure_future(self.reconcile_from_disk())
         self.themes = []
+
+    async def find_config(self) -> str:
+        btop = await self.parent.btop
+        assert btop is not None
+
+        bin_dir = os.path.dirname(btop)
+        if platform.system() == 'Windows':
+            return os.path.join(bin_dir, 'btop.conf')
+        else:
+            return BtopConfig.CONFIG
 
     async def reconcile_from_disk(self) -> None:
         await self.parent.dependencies_installed
@@ -525,40 +583,52 @@ class BtopConfig(ScryptedDeviceBase, Scriptable, Readme):
         await thememanager.themes_loaded
 
         try:
-            if not os.path.exists(BtopConfig.CONFIG):
-                os.makedirs(os.path.dirname(BtopConfig.CONFIG), exist_ok=True)
-                with open(BtopConfig.CONFIG, 'w') as f:
-                    f.write(BtopConfig.DEFAULT_CONFIG)
-            self.print(f"Using config file: {BtopConfig.CONFIG}")
+            btop = await self.parent.btop
+            assert btop is not None
 
-            with open(BtopConfig.CONFIG) as f:
+            config = await self.config_path
+
+            if not os.path.exists(config):
+                os.makedirs(os.path.dirname(config), exist_ok=True)
+                with open(config, 'w') as f:
+                    f.write(BtopConfig.DEFAULT_CONFIG)
+            self.print(f"Using config file: {config}")
+
+            with open(config) as f:
                 data = f.read()
 
             if self.storage.getItem('config') and data != self.config:
-                with open(BtopConfig.CONFIG, 'w') as f:
+                with open(config, 'w') as f:
                     f.write(self.config)
 
             if not self.storage.getItem('config'):
                 self.storage.setItem('config', data)
 
-            btop = shutil.which('btop')
-            assert btop is not None
-
             bin_dir = os.path.dirname(btop)
-            config_dir = os.path.realpath(os.path.join(os.path.dirname(bin_dir), 'share', 'btop', 'themes'))
-            self.print(f"Using themes dir: {config_dir}, {BtopConfig.HOME_THEMES_DIR}")
-            if os.path.exists(config_dir):
-                self.themes = [
-                    theme.removesuffix('.theme')
-                    for theme in os.listdir(config_dir)
-                    if theme.endswith('.theme')
-                ]
-            if os.path.exists(BtopConfig.HOME_THEMES_DIR):
-                self.themes.extend([
-                    theme.removesuffix('.theme')
-                    for theme in os.listdir(BtopConfig.HOME_THEMES_DIR)
-                    if theme.endswith('.theme')
-                ])
+            if platform.system() == 'Windows':
+                theme_dir = os.path.realpath(os.path.join(bin_dir, 'themes'))
+                self.print(f"Using themes dir: {theme_dir}")
+                if os.path.exists(theme_dir):
+                    self.themes = [
+                        theme.removesuffix('.theme')
+                        for theme in os.listdir(theme_dir)
+                        if theme.endswith('.theme')
+                    ]
+            else:
+                config_dir = os.path.realpath(os.path.join(os.path.dirname(bin_dir), 'share', 'btop', 'themes'))
+                self.print(f"Using themes dir: {config_dir}, {BtopConfig.HOME_THEMES_DIR}")
+                if os.path.exists(config_dir):
+                    self.themes = [
+                        theme.removesuffix('.theme')
+                        for theme in os.listdir(config_dir)
+                        if theme.endswith('.theme')
+                    ]
+                if os.path.exists(BtopConfig.HOME_THEMES_DIR):
+                    self.themes.extend([
+                        theme.removesuffix('.theme')
+                        for theme in os.listdir(BtopConfig.HOME_THEMES_DIR)
+                        if theme.endswith('.theme')
+                    ])
             self.themes.sort()
 
             await self.onDeviceEvent(ScryptedInterface.Readme.value, None)
@@ -589,20 +659,21 @@ class BtopConfig(ScryptedDeviceBase, Scriptable, Readme):
 
     async def saveScript(self, script: ScriptSource) -> None:
         await self.config_reconciled
+        config = await self.config_path
 
         self.storage.setItem('config', script['script'])
         await self.onDeviceEvent(ScryptedInterface.Scriptable.value, None)
 
         updated = False
-        with open(BtopConfig.CONFIG) as f:
+        with open(config) as f:
             if f.read() != script['script']:
                 updated = True
 
         if updated:
             if not script['script']:
-                os.remove(BtopConfig.CONFIG)
+                os.remove(config)
             else:
-                with open(BtopConfig.CONFIG, 'w') as f:
+                with open(config, 'w') as f:
                     f.write(script['script'])
 
             self.print("Configuration updated, will restart...")
@@ -712,18 +783,32 @@ List fonts to download and install in the local font directory. Fonts will be in
 class BtopThemeManager(DownloaderBase, Settings, Readme):
     LOCAL_THEME_DIR = os.path.expanduser(f'~/.config/btop/themes')
 
-    def __init__(self, nativeId: str | None = None):
+    def __init__(self, nativeId: str, parent: BtopCamera):
         super().__init__(nativeId)
+        self.parent = parent
+        self.themes_dir = asyncio.ensure_future(self.find_themes_dir())
         self.themes_loaded = asyncio.ensure_future(self.load_themes())
 
+    async def find_themes_dir(self) -> str:
+        btop = await self.parent.btop
+        assert btop is not None
+
+        bin_dir = os.path.dirname(btop)
+        if platform.system() == 'Windows':
+            return os.path.realpath(os.path.join(bin_dir, 'themes'))
+        else:
+            return BtopThemeManager.LOCAL_THEME_DIR
+
     async def load_themes(self) -> None:
-        os.makedirs(BtopThemeManager.LOCAL_THEME_DIR, exist_ok=True)
+        themes_dir = await self.themes_dir
+        self.print("Using themes dir:", themes_dir)
+        os.makedirs(themes_dir, exist_ok=True)
         try:
             urls = self.theme_urls
             for url in urls:
                 filename = url.split('/')[-1]
                 fullpath = self.downloadFile(url, filename)
-                target = os.path.join(BtopThemeManager.LOCAL_THEME_DIR, filename)
+                target = os.path.join(themes_dir, filename)
                 shutil.copyfile(fullpath, target)
                 self.print("Installed", target)
         except:
@@ -755,10 +840,11 @@ class BtopThemeManager(DownloaderBase, Settings, Readme):
         await scrypted_sdk.deviceManager.requestRestart()
 
     async def getReadmeMarkdown(self) -> str:
-        return """
+        themes_dir = await self.themes_dir
+        return f"""
 # Theme Manager
 
-List themes to download and install in the local theme directory. Themes will be installed to `~/.config/btop/themes`.
+List themes to download and install in the local theme directory. Themes will be installed to `{themes_dir}`.
 """
 
 

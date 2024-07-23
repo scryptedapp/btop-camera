@@ -42,7 +42,8 @@
          "DeviceProvider"
       ],
       "pluginDependencies": [
-         "@scrypted/prebuffer-mixin"
+         "@scrypted/prebuffer-mixin",
+         "@scrypted/btop"
       ]
    },
    "devDependencies": {
