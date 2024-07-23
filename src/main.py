@@ -729,20 +729,28 @@ class DownloaderBase(ScryptedDeviceBase):
 class BtopFontManager(DownloaderBase, Settings, Readme):
     FONT_DIR_PATTERN = '~/.local/share/fonts' if platform.system() == 'Linux' else '~/.fonts'
     LOCAL_FONT_DIR = os.path.expanduser(FONT_DIR_PATTERN)
+    WSL_FONT_DIR = '~/.local/share/fonts'
 
     def __init__(self, nativeId: str | None = None):
         super().__init__(nativeId)
         self.fonts_loaded = asyncio.ensure_future(self.load_fonts())
 
     async def load_fonts(self) -> None:
-        os.makedirs(BtopFontManager.LOCAL_FONT_DIR, exist_ok=True)
+        if platform.system() == 'Windows':
+            subprocess.Popen(["wsl", "mkdir", "-p", BtopFontManager.WSL_FONT_DIR], shell=True).communicate()
+        else:
+            os.makedirs(BtopFontManager.LOCAL_FONT_DIR, exist_ok=True)
         try:
             urls = self.font_urls
             for url in urls:
                 filename = url.split('/')[-1]
                 fullpath = self.downloadFile(url, filename)
-                target = os.path.join(BtopFontManager.LOCAL_FONT_DIR, filename)
-                shutil.copyfile(fullpath, target)
+                if platform.system() == 'Windows':
+                    target = f"{BtopFontManager.WSL_FONT_DIR}/{filename}"
+                    copy_file_to(fullpath, target)
+                else:
+                    target = os.path.join(BtopFontManager.LOCAL_FONT_DIR, filename)
+                    shutil.copyfile(fullpath, target)
                 self.print("Installed", target)
         except:
             import traceback
