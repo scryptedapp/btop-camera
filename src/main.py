@@ -769,7 +769,7 @@ class BtopFontManager(DownloaderBase, Settings, Readme):
             {
                 "key": "font_urls",
                 "title": "Font URLs",
-                "description": f"List of URLs to download fonts from. Fonts will be downloaded to {BtopFontManager.FONT_DIR_PATTERN}.",
+                "description": f"List of URLs to download fonts from. Fonts will be downloaded to {BtopFontManager.WSL_FONT_DIR if platform.system() == 'Windows' else BtopFontManager.FONT_DIR_PATTERN}.",
                 "value": self.font_urls,
                 "multiple": True,
             },
