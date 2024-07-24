@@ -3,5 +3,3 @@ out/
 node_modules/
 dist/
 .venv
-fs/ffmpeg_in_cygwin.com
-cosmo-bin

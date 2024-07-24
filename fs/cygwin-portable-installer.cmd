@@ -42,7 +42,7 @@ set CYGWIN_ARCH=auto
 set CYGWIN_USERNAME=root
 
 :: select the packages to be installed automatically via apt-cyg
-set CYGWIN_PACKAGES=bash,coreutils,openssl,xorg-server-extra,ffmpeg,libopenh264,fontconfig,xterm,xorg-x11-fonts-misc,xorg-x11-fonts-dpi100
+set CYGWIN_PACKAGES=bash,coreutils,openssl,xorg-server-extra,ffmpeg,libopenh264,libvpl,fontconfig,xterm,xorg-x11-fonts-misc
 
 :: if set to 'yes' the local package cache created by cygwin setup will be deleted after installation/update
 set DELETE_CYGWIN_PACKAGE_CACHE=yes

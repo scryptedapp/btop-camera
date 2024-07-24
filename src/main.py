@@ -249,6 +249,11 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 await run_cleanup_subprocess('ffmpeg')
             except:
                 pass
+            if platform.system() == "Windows":
+                try:
+                    await run_cleanup_subprocess('cygserver')
+                except:
+                    pass
 
             if platform.system() != "Windows":
                 pathlib.Path(BtopCamera.XAUTH).unlink(missing_ok=True)
@@ -296,15 +301,16 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 except:
                     pass
 
-                async def periodic_monitor():
+                async def periodic_monitor(proc):
                     while True:
                         try:
-                            with open(BtopCamera.MONITOR_FILE, 'w') as f:
+                            with open(BtopCamera.MONITOR_FILE+f".{proc}", 'w') as f:
                                 f.write('')
                         except:
                             pass
                         await asyncio.sleep(3)
-                asyncio.create_task(periodic_monitor())
+                asyncio.create_task(periodic_monitor('Xvfb'))
+                asyncio.create_task(periodic_monitor('cygserver'))
         except:
             import traceback
             traceback.print_exc()
@@ -321,11 +327,21 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             fontmanager = await self.getDevice('fontmanager')
             await fontmanager.fonts_loaded
 
+        async def run_cygserver():
+            await run_and_stream_output(f'"{BtopCamera.CYGWIN_LAUNCHER}" "cygserver-config -n"')
+            while True:
+                await run_self_cleanup_subprocess('/usr/sbin/cygserver', kill_proc='cygserver')
+                print("cygserver crashed, restarting in 5s...")
+                await asyncio.sleep(5)
+
         async def run_stream():
+            await asyncio.sleep(3)
+
             exe = await self.btop
             env = {
                 "LANG": "en_US.UTF-8",
             }
+            xterm_tweaks = ""
 
             if not exe:
                 raise Exception("btop executable not found, cannot start stream.")
@@ -333,6 +349,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             if platform.system() == "Windows":
                 exe = subprocess.check_output([BtopCamera.CYGWIN_LAUNCHER, f"cygpath '{exe}'"]).decode().strip()
                 exe = f"'{exe}'"
+                xterm_tweaks = f"+tb +sb -fullscreen -geometry {self.display_dimensions}"
 
             if platform.system() == 'Darwin':
                 path = os.environ.get('PATH')
@@ -346,12 +363,14 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                     fontselection = f'-fa \'{font}\''
 
             while True:
-                await run_self_cleanup_subprocess(f'{BtopCamera.XVFB_RUN} -n {self.virtual_display_num} -s \'-screen 0 {self.display_dimensions}x24\' -f {BtopCamera.XAUTH} xterm {fontselection} -en UTF-8 -maximized -e {exe} -p {self.btop_preset}',
+                await run_self_cleanup_subprocess(f'{BtopCamera.XVFB_RUN} -n {self.virtual_display_num} -s \'-screen 0 {self.display_dimensions}x24\' -f {BtopCamera.XAUTH} xterm {xterm_tweaks} {fontselection} -en UTF-8 -maximized -e {exe} -p {self.btop_preset}',
                                                   env=env, kill_proc='Xvfb')
 
                 print("Xvfb crashed, restarting in 5s...")
                 await asyncio.sleep(5)
 
+        if platform.system() == "Windows":
+            asyncio.create_task(run_cygserver())
         asyncio.create_task(run_stream())
 
     @property
@@ -361,7 +380,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
         return 99
 
     @property
-    def display_dimensions(self) -> int:
+    def display_dimensions(self) -> str:
         if self.storage:
             return self.storage.getItem('display_dimensions') or '1024x720'
         return '1024x720'
@@ -505,7 +524,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 "XAUTHORITY": BtopCamera.XAUTH,
             },
             "h264EncoderArguments": [
-                "-c:v", "libx264",
+                "-c:v", "libx264" if platform.system() != "Windows" else "libopenh264",
                 "-preset", "ultrafast",
                 "-bf", "0",
                 "-r", "15",
