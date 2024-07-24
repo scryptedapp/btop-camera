@@ -1,11 +1,10 @@
 import os
 import sys
-import tempfile
 
 import psutil
 
 
-PIDFILE_DIR = os.getenv("SCRYPTED_BTOP_PIDFILE_DIR") or os.path.join(tempfile.gettempdir(), ".scrypted_btop")
+PIDFILE_DIR = os.getenv("SCRYPTED_BTOP_PIDFILE_DIR")
 
 
 if __name__ == "__main__":
@@ -17,7 +16,7 @@ if __name__ == "__main__":
             pid = int(f.read())
             p = psutil.Process(pid)
             for child in p.children(recursive=True):
-                if child.name() == proc_name:
+                if child.name() == proc_name or child.name() == f"{proc_name}.exe":
                     child.kill()
             p.kill()
     except:

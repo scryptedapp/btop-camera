@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import os
 import pathlib
@@ -63,28 +64,21 @@ async def run_and_stream_output(cmd: str, env: Dict[str, str] = {}, return_pid: 
 
 async def run_self_cleanup_subprocess(cmd: str, env: Dict[str, str] = {}, kill_proc: str = None) -> None:
     """Launch an instance of Python which monitors the subprocess and kills it if the parent process dies."""
-    if platform.system() != "Windows":
-        exe = sys.executable
-        args = [
-            BtopCamera.RUN_SEPARATELY_SCRIPT,
-            cmd,
-            json.dumps(env),
-            kill_proc or 'None',
-            'None'
-        ]
-    else:
-        exe = shutil.which('wsl')
-        args = [
-            'python3',
-            BtopCamera.RUN_SEPARATELY_SCRIPT,
-            cmd,
-            json.dumps(env),
-            kill_proc or 'None',
-            BtopCamera.MONITOR_FILE,
-        ]
+    exe = sys.executable
+
+    if platform.system() == 'Windows':
+        cmd = f"\"{BtopCamera.CYGWIN_LAUNCHER}\" \"{cmd}\""
+
+    args = [
+        BtopCamera.RUN_SEPARATELY_SCRIPT,
+        cmd,
+        json.dumps(env),
+        kill_proc or 'None',
+        BtopCamera.MONITOR_FILE if platform.system() == 'Windows' else 'None'
+    ]
 
     script_env = os.environ.copy()
-    script_env['SCRYPTED_BTOP_PIDFILE_DIR'] = BtopCamera.FILES
+    script_env['SCRYPTED_BTOP_PIDFILE_DIR'] = BtopCamera.VOLUME_FILES
     p = await asyncio.create_subprocess_exec(exe, *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True, env=script_env)
 
     async def read_streams():
@@ -102,22 +96,14 @@ async def run_self_cleanup_subprocess(cmd: str, env: Dict[str, str] = {}, kill_p
 
 async def run_cleanup_subprocess(kill_proc: str) -> None:
     """Launches an instance of Python to clean up dangling processes from a previous plugin instance."""
-    if platform.system() != "Windows":
-        exe = sys.executable
-        args = [
-            BtopCamera.CLEANUP_SEPARATELY_SCRIPT,
-            kill_proc,
-        ]
-    else:
-        exe = shutil.which('wsl')
-        args = [
-            'python3',
-            BtopCamera.CLEANUP_SEPARATELY_SCRIPT,
-            kill_proc,
-        ]
+    exe = sys.executable
+    args = [
+        BtopCamera.CLEANUP_SEPARATELY_SCRIPT,
+        kill_proc,
+    ]
 
     script_env = os.environ.copy()
-    script_env['SCRYPTED_BTOP_PIDFILE_DIR'] = BtopCamera.FILES
+    script_env['SCRYPTED_BTOP_PIDFILE_DIR'] = BtopCamera.VOLUME_FILES
     p = await asyncio.create_subprocess_exec(exe, *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True, env=script_env)
 
     async def read_streams():
@@ -144,29 +130,29 @@ def copy_file_to(path: str, dest: str, make_executable: bool = False) -> None:
             data = f.read()
 
         # launch tee as subprocess
-        exe = shutil.which('wsl')
-        args = [
-            'tee', dest
-        ]
-        subprocess.Popen([exe, *args], stdin=subprocess.PIPE, stdout=subprocess.PIPE, shell=True).communicate(data)
+        subprocess.Popen(f'"{BtopCamera.CYGWIN_LAUNCHER}" "tee {dest}"', stdin=subprocess.PIPE, stdout=subprocess.PIPE, shell=True).communicate(data)
 
         if make_executable:
             # make executable
-            subprocess.Popen(["wsl", "chmod", "755", dest], shell=True).communicate()
+            subprocess.Popen(f'"{BtopCamera.CYGWIN_LAUNCHER}" "chmod 755 {dest}"', shell=True).communicate()
 
 
 class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
-    FILES = "/tmp/.scrypted_btop" if platform.system() == "Windows" else os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'files')
+    VOLUME_FILES = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'files')
+    CYGWIN_INSTALL_DONE = os.path.join(VOLUME_FILES, 'cygwin_install_done')
+    CYGWIN_PORTABLE_INSTALLER = os.path.join(VOLUME_FILES, 'cygwin-portable-installer.cmd')
+    CYGWIN_LAUNCHER = os.path.join(VOLUME_FILES, 'cygwin-portable.cmd')
+    MONITOR_FILE = os.path.join(VOLUME_FILES, f"monitor.{os.getpid()}")
+
+    FILES = "/tmp/.scrypted_btop" if platform.system() == "Windows" else VOLUME_FILES
     XAUTH = f"{FILES}/Xauthority"
     XVFB_RUN = f"{FILES}/xvfb-run"
-    RUN_SEPARATELY_SCRIPT = f"{FILES}/run_separately.py"
-    CLEANUP_SEPARATELY_SCRIPT = f"{FILES}/cleanup_separately.py"
-    MONITOR_FILE = f"{FILES}/monitor"
 
-    FFMPEG_IN_WSL = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'zip', 'unzipped', 'fs', 'ffmpeg_in_wsl.com')
+    FFMPEG_IN_CYGWIN = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'zip', 'unzipped', 'fs', 'ffmpeg_in_cygwin.com')
+    CYGWIN_PORTABLE_INSTALLER_SRC = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'zip', 'unzipped', 'fs', 'cygwin-portable-installer.cmd')
     XVFB_RUN_SRC = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'zip', 'unzipped', 'fs', 'xvfb-run')
-    RUN_SEPARATELY_SCRIPT_SRC = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'zip', 'unzipped', 'run_separately.py')
-    CLEANUP_SEPARATELY_SCRIPT_SRC = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'zip', 'unzipped', 'cleanup_separately.py')
+    RUN_SEPARATELY_SCRIPT = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'zip', 'unzipped', 'run_separately.py')
+    CLEANUP_SEPARATELY_SCRIPT = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'zip', 'unzipped', 'cleanup_separately.py')
 
     def __init__(self, nativeId: str = None) -> None:
         super().__init__(nativeId)
@@ -178,6 +164,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
         self.fonts_cache = None
         self.dependencies_installed = asyncio.ensure_future(self.install_dependencies())
         self.stream_initialized = asyncio.ensure_future(self.init_stream())
+        self.cygwin_ffmpeg = asyncio.ensure_future(self.get_cygwin_ffmpeg())
 
     async def load_btop_exe(self) -> str:
         try:
@@ -201,6 +188,25 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             if installation in ('docker', 'lxc'):
                 await run_and_stream_output('apt-get update')
                 await run_and_stream_output('apt-get install -y xvfb xterm xfonts-base fontconfig')
+            elif platform.system() == 'Windows':
+                os.makedirs(BtopCamera.VOLUME_FILES, exist_ok=True)
+                shutil.copyfile(BtopCamera.CYGWIN_PORTABLE_INSTALLER_SRC, BtopCamera.CYGWIN_PORTABLE_INSTALLER)
+
+                with open(BtopCamera.CYGWIN_PORTABLE_INSTALLER, 'r') as f:
+                    data = f.read()
+                installer_md5 = hashlib.md5(data.encode()).hexdigest()
+                needs_install = True
+                try:
+                    with open(BtopCamera.CYGWIN_INSTALL_DONE, 'r') as f:
+                        if f.read() == installer_md5:
+                            needs_install = False
+                except:
+                    pass
+
+                if needs_install:
+                    await run_and_stream_output(f'"{BtopCamera.CYGWIN_PORTABLE_INSTALLER}"')
+                    with open(BtopCamera.CYGWIN_INSTALL_DONE, 'w') as f:
+                        f.write(installer_md5)
             else:
                 if platform.system() == 'Linux':
                     needed = []
@@ -230,44 +236,14 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                     if needed:
                         needed.sort()
                         raise Exception(f"Please manually install the following and restart the plugin: {needed}")
-                elif platform.system() == 'Windows':
-                    if shutil.which('wsl') is None:
-                        raise Exception("Please install WSL and restart the plugin.")
-
-                    def check_exists_in_wsl(exe):
-                        try:
-                            subprocess.check_output(["wsl", "which", exe], shell=True).decode().strip()
-                            return True
-                        except:
-                            return False
-
-                    needed = []
-                    if not check_exists_in_wsl('ffmpeg'):
-                        needed.append('ffmpeg')
-                    if not check_exists_in_wsl('xterm'):
-                        needed.append('xterm')
-                        needed.append('xfonts-base')
-                    if not check_exists_in_wsl('Xvfb'):
-                        needed.append('xvfb')
-                    if not check_exists_in_wsl('wslpath'):
-                        needed.append('wslpath')
-                    if not check_exists_in_wsl('ip'):
-                        needed.append('ip')
-                    if not check_exists_in_wsl('tee'):
-                        needed.append('coreutils')
-
-                    if not check_exists_in_wsl('fc-list'):
-                        print("Warning: fc-list not found in WSL. Changing fonts will not be enabled.")
-
-                    if needed:
-                        needed.sort()
-                        raise Exception(f"Please manually install the following in WSL and restart the plugin: {needed}")
                 else:
                     raise Exception("This plugin only supports Linux and MacOS.")
 
             try:
                 await run_cleanup_subprocess('Xvfb')
             except:
+                import traceback
+                traceback.print_exc()
                 pass
             try:
                 await run_cleanup_subprocess('ffmpeg')
@@ -278,11 +254,9 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 pathlib.Path(BtopCamera.XAUTH).unlink(missing_ok=True)
                 pathlib.Path(BtopCamera.FILES).mkdir(parents=True, exist_ok=True)
             else:
-                subprocess.Popen(["wsl", "rm", "-rf", BtopCamera.FILES], shell=True).communicate()
-                subprocess.Popen(["wsl", "mkdir", "-p", BtopCamera.FILES], shell=True).communicate()
+                subprocess.Popen(f'"{BtopCamera.CYGWIN_LAUNCHER}" "rm -rf {BtopCamera.FILES}"', shell=True).communicate()
+                subprocess.Popen(f'"{BtopCamera.CYGWIN_LAUNCHER}" "mkdir -p {BtopCamera.FILES}"', shell=True).communicate()
             copy_file_to(BtopCamera.XVFB_RUN_SRC, BtopCamera.XVFB_RUN, make_executable=True)
-            copy_file_to(BtopCamera.RUN_SEPARATELY_SCRIPT_SRC, BtopCamera.RUN_SEPARATELY_SCRIPT)
-            copy_file_to(BtopCamera.CLEANUP_SEPARATELY_SCRIPT_SRC, BtopCamera.CLEANUP_SEPARATELY_SCRIPT)
 
             await scrypted_sdk.deviceManager.onDeviceDiscovered({
                 "nativeId": "config",
@@ -314,10 +288,19 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 })
 
             if platform.system() == "Windows":
+                # clean up old monitors
+                try:
+                    for file in os.listdir(BtopCamera.VOLUME_FILES):
+                        if file.startswith('monitor.'):
+                            os.remove(os.path.join(BtopCamera.VOLUME_FILES, file))
+                except:
+                    pass
+
                 async def periodic_monitor():
                     while True:
                         try:
-                            subprocess.Popen(["wsl", "touch", BtopCamera.MONITOR_FILE], shell=True).communicate()
+                            with open(BtopCamera.MONITOR_FILE, 'w') as f:
+                                f.write('')
                         except:
                             pass
                         await asyncio.sleep(3)
@@ -348,9 +331,8 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 raise Exception("btop executable not found, cannot start stream.")
 
             if platform.system() == "Windows":
-                # translate with wslpath
-                exe = subprocess.check_output(["wsl", "wslpath", exe], shell=True).decode().strip()
-                print("Translated to WSL path:", exe)
+                exe = subprocess.check_output([BtopCamera.CYGWIN_LAUNCHER, f"cygpath '{exe}'"]).decode().strip()
+                exe = f"'{exe}'"
 
             if platform.system() == 'Darwin':
                 path = os.environ.get('PATH')
@@ -361,10 +343,10 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             if self.fonts_supported:
                 font = self.xterm_font
                 if font != 'Default':
-                    fontselection = f'-fa "{font}"'
+                    fontselection = f'-fa \'{font}\''
 
             while True:
-                await run_self_cleanup_subprocess(f'{BtopCamera.XVFB_RUN} -n {self.virtual_display_num} -s "-screen 0 {self.display_dimensions}x24" -f {BtopCamera.XAUTH} xterm {fontselection} -en UTF-8 -maximized -e "{exe}" -p {self.btop_preset}',
+                await run_self_cleanup_subprocess(f'{BtopCamera.XVFB_RUN} -n {self.virtual_display_num} -s \'-screen 0 {self.display_dimensions}x24\' -f {BtopCamera.XAUTH} xterm {fontselection} -en UTF-8 -maximized -e {exe} -p {self.btop_preset}',
                                                   env=env, kill_proc='Xvfb')
 
                 print("Xvfb crashed, restarting in 5s...")
@@ -411,7 +393,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             return os.path.exists('/opt/X11/bin/fc-list')
         if platform.system() == 'Windows':
             try:
-                subprocess.check_output(["wsl", "which", "fc-list"], shell=True).decode().strip()
+                subprocess.check_output([BtopCamera.CYGWIN_LAUNCHER, "which fc-list"]).decode().strip()
                 return True
             except:
                 pass
@@ -426,17 +408,15 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             return self.fonts_cache
 
         fonts = []
-        fc_list_cmd = ['wsl', 'fc-list', ':', 'family'] if platform.system() == 'Windows' else \
+        fc_list_cmd = [BtopCamera.CYGWIN_LAUNCHER, 'fc-list : family'] if platform.system() == 'Windows' else \
             ['fc-list' if platform.system() == 'Linux' else '/opt/X11/bin/fc-list', ':', 'family']
         try:
             # list font families with fc-list
-            p = subprocess.Popen(fc_list_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            out, err = p.communicate(timeout=10)
-            if p.returncode == 0:
-                for line in out.decode().splitlines():
-                    font = line.strip()
-                    if font:
-                        fonts.append(font)
+            out = subprocess.check_output(fc_list_cmd).decode().strip()
+            for line in out.splitlines():
+                font = line.strip()
+                if font:
+                    fonts.append(font)
         except:
             print("Could not enumerate fonts with fc-list")
             pass
@@ -506,6 +486,11 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             }
         ]
 
+    async def get_cygwin_ffmpeg(self) -> str:
+        assert platform.system() == 'Windows'
+        await self.dependencies_installed
+        return subprocess.check_output([BtopCamera.CYGWIN_LAUNCHER, "cygpath -w $(which ffmpeg)"]).decode().strip()
+
     async def getVideoStream(self, options: RequestMediaStreamOptions = None) -> scrypted_sdk.MediaObject:
         await self.stream_initialized
 
@@ -534,7 +519,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             elif os.path.exists('/usr/local/bin/ffmpeg'):
                 ffmpeg_input['ffmpegPath'] = '/usr/local/bin/ffmpeg'
         elif platform.system() == 'Windows':
-            ffmpeg_input['ffmpegPath'] = BtopCamera.FFMPEG_IN_WSL
+            ffmpeg_input['ffmpegPath'] = await self.cygwin_ffmpeg
 
         return await scrypted_sdk.mediaManager.createFFmpegMediaObject(ffmpeg_input)
 
@@ -545,7 +530,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             return self.btop_config
         elif nativeId == 'fontmanager':
             if not self.fontmanager:
-                self.fontmanager = BtopFontManager(nativeId)
+                self.fontmanager = BtopFontManager(nativeId, self)
             return self.fontmanager
         elif nativeId == 'thememanager':
             if not self.thememanager:
@@ -731,13 +716,15 @@ class BtopFontManager(DownloaderBase, Settings, Readme):
     LOCAL_FONT_DIR = os.path.expanduser(FONT_DIR_PATTERN)
     WSL_FONT_DIR = '~/.local/share/fonts'
 
-    def __init__(self, nativeId: str | None = None):
+    def __init__(self, nativeId: str, parent: BtopCamera):
         super().__init__(nativeId)
+        self.parent = parent
         self.fonts_loaded = asyncio.ensure_future(self.load_fonts())
 
     async def load_fonts(self) -> None:
         if platform.system() == 'Windows':
-            subprocess.Popen(["wsl", "mkdir", "-p", BtopFontManager.WSL_FONT_DIR], shell=True).communicate()
+            await self.parent.dependencies_installed
+            subprocess.Popen(f'"{BtopCamera.CYGWIN_LAUNCHER}" "mkdir -p {BtopFontManager.WSL_FONT_DIR}"', shell=True).communicate()
         else:
             os.makedirs(BtopFontManager.LOCAL_FONT_DIR, exist_ok=True)
         try:

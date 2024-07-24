@@ -3,13 +3,12 @@ import os
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 
 import psutil
 
 
-PIDFILE_DIR = os.getenv("SCRYPTED_BTOP_PIDFILE_DIR") or os.path.join(tempfile.gettempdir(), ".scrypted_btop")
+PIDFILE_DIR = os.getenv("SCRYPTED_BTOP_PIDFILE_DIR")
 try:
     os.makedirs(PIDFILE_DIR, exist_ok=True)
 except:
@@ -28,22 +27,31 @@ if __name__ == "__main__":
     if monitor_file == 'None':
         monitor_file = None
 
+    print("Running", cmd)
+
     parent = psutil.Process(os.getppid())
 
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
-    name = cmd.split()[0]
+    name = kill_proc or cmd.split()[0]
     print(f"{name} starting")
     sp = subprocess.Popen(cmd, shell=True, env=dict(os.environ, **env))
 
     with open(os.path.join(PIDFILE_DIR, f"{kill_proc}.pid"), 'w') as f:
         f.write(str(sp.pid))
 
+    kill_proc_found = False
     monitor_not_found_count = 0
     while parent.is_running():
         # check if the subprocess is still alive, if not then exit
         if sp.poll() is not None:
+            try:
+                print(f"{name} exited by itself")
+                print(sp)
+            except:
+                # in case stdout was closed
+                pass
             break
         if monitor_file:
             # check if the monitor file exists, if not then exit
@@ -57,6 +65,18 @@ if __name__ == "__main__":
                     os.remove(monitor_file)
                 except:
                     pass
+        if kill_proc and not kill_proc_found:
+            try:
+                p = psutil.Process(sp.pid)
+                for child in p.children(recursive=True):
+                    if child.name() == kill_proc or child.name() == f"{kill_proc}.exe":
+                        kill_proc_found = True
+                        with open(os.path.join(PIDFILE_DIR, f"{kill_proc}.pid"), 'w') as f:
+                            f.write(str(child.pid))
+                        break
+                p.kill()
+            except:
+                pass
         time.sleep(3)
 
     try:
@@ -69,7 +89,7 @@ if __name__ == "__main__":
         try:
             p = psutil.Process(sp.pid)
             for child in p.children(recursive=True):
-                if child.name() == kill_proc:
+                if child.name() == kill_proc or child.name() == f"{kill_proc}.exe":
                     try:
                         child.kill()
                     except:

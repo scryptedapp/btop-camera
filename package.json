@@ -19,7 +19,7 @@
    "scripts": {
       "scrypted-setup-project": "scrypted-setup-project",
       "prescrypted-setup-project": "scrypted-package-json",
-      "build": "mkdir -p cosmo-bin && cosmoc++ ffmpeg_in_wsl.cpp -o cosmo-bin/ffmpeg_in_wsl.com && cp cosmo-bin/*.com fs && scrypted-webpack",
+      "build": "mkdir -p cosmo-bin && cosmoc++ ffmpeg_in_cygwin.cpp -o cosmo-bin/ffmpeg_in_cygwin.com && cp cosmo-bin/*.com fs && scrypted-webpack",
       "prepublishOnly": "NODE_ENV=production scrypted-webpack",
       "prescrypted-vscode-launch": "scrypted-webpack",
       "scrypted-vscode-launch": "scrypted-deploy-debug",

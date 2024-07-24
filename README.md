@@ -6,12 +6,10 @@ For local Scrypted installs on **Linux**, several system packages must be manual
 
 For local Scrypted installs on **MacOS**, several brew packages must be manually installed: `xquartz`, `gnu-getopt`, `ffmpeg`.
 
-For local Scrypted installs on **Windows**, Windows Subsystem for Linux (WSL) is required. Several packages must be manually installed *within* WSL: `xvfb`, `xterm`, `xfonts-base`, `ffmpeg`. The optional dependency `fontconfig` can be installed to enable changing fonts.
-
 This plugin provides a virtual camera device that continuously streams output from the `btop` system monitoring tool. Under the hood, a virtual X11 display is created to run `btop` and `xterm`.
 
-On Windows, WSL is used to host the virtual X11 display and run `ffmpeg` to capture display output. The `btop4win` program is then launched in Windows, with its display captured within WSL. Bridged networking is required for `ffmpeg` to connect back to the host Windows OS.
+On Windows, Cygwin will be automatically installed to handle the virtual X11 display.
 
 ## Advanced usage: Hardware-accelerated encoding
 
-By default, this plugin requests that the Rebroadcast plugin use the FFmpeg arguments `-c:v libx264 -preset -ultrafast -bf 0 -r 15 -g 60` for encoding H264 video from the virtual X11 display. To enable hardware acceleration, copy the above into the "FFmpeg Output Prefix" settings for the stream, replacing `libx264` with the hardware-accelerated encoder for your platform. Note that for Windows, the encoder must be one supported within WSL.
+By default, this plugin requests that the Rebroadcast plugin use the FFmpeg arguments `-c:v libx264 -preset -ultrafast -bf 0 -r 15 -g 60` for encoding H264 video from the virtual X11 display. To enable hardware acceleration, copy the above into the "FFmpeg Output Prefix" settings for the stream, replacing `libx264` with the hardware-accelerated encoder for your platform. Note that for Windows, the encoder must be one supported within Cygwin.
