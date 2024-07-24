@@ -19,9 +19,7 @@ if __name__ == "__main__":
                 if child.name() == proc_name or child.name() == f"{proc_name}.exe":
                     child.kill()
             p.kill()
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
+    except:
         pass
     finally:
         try:

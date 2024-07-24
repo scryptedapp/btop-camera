@@ -1,6 +1,7 @@
 import concurrent.futures
 import json
 import os
+import platform
 import signal
 import subprocess
 import sys
@@ -45,7 +46,7 @@ if __name__ == "__main__":
     done = concurrent.futures.Future()
     def run():
         try:
-            subprocess.Popen(cmd, env=dict(os.environ, **env)).communicate()
+            subprocess.Popen(cmd, env=dict(os.environ, **env), shell=platform.system() != "Windows").communicate()
         except:
             pass
         finally:
