@@ -12,4 +12,4 @@ On Windows, Cygwin will be automatically installed to handle the virtual X11 dis
 
 ## Advanced usage: Hardware-accelerated encoding
 
-By default, this plugin requests that the Rebroadcast plugin use the FFmpeg arguments `-c:v libx264 -preset -ultrafast -bf 0 -r 15 -g 60` for encoding H264 video from the virtual X11 display. To enable hardware acceleration, copy the above into the "FFmpeg Output Prefix" settings for the stream, replacing `libx264` with the hardware-accelerated encoder for your platform. Note that for Windows, the encoder must be one supported within Cygwin.
+By default, this plugin requests that the Rebroadcast plugin use the FFmpeg arguments `-c:v libx264 -preset -ultrafast -bf 0 -r 15 -g 60` for encoding H264 video from the virtual X11 display (`libopenh264` is used on Windows instead of `libx264`). To enable hardware acceleration, copy the above into the "FFmpeg Output Prefix" settings for the stream, replacing `libx264` with the hardware-accelerated encoder for your platform. Note that for Windows, the encoder must be one supported within Cygwin.
