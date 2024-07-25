@@ -733,7 +733,7 @@ class DownloaderBase(ScryptedDeviceBase):
 class BtopFontManager(DownloaderBase, Settings, Readme):
     FONT_DIR_PATTERN = '~/.local/share/fonts' if platform.system() == 'Linux' else '~/.fonts'
     LOCAL_FONT_DIR = os.path.expanduser(FONT_DIR_PATTERN)
-    WSL_FONT_DIR = '~/.local/share/fonts'
+    CYGWIN_FONT_DIR = '~/.local/share/fonts'
 
     def __init__(self, nativeId: str, parent: BtopCamera):
         super().__init__(nativeId)
@@ -743,7 +743,7 @@ class BtopFontManager(DownloaderBase, Settings, Readme):
     async def load_fonts(self) -> None:
         if platform.system() == 'Windows':
             await self.parent.dependencies_installed
-            subprocess.Popen(f'"{BtopCamera.CYGWIN_LAUNCHER}" "mkdir -p {BtopFontManager.WSL_FONT_DIR}"', shell=True).communicate()
+            subprocess.Popen(f'"{BtopCamera.CYGWIN_LAUNCHER}" "mkdir -p {BtopFontManager.CYGWIN_FONT_DIR}"', shell=True).communicate()
         else:
             os.makedirs(BtopFontManager.LOCAL_FONT_DIR, exist_ok=True)
         try:
@@ -752,7 +752,7 @@ class BtopFontManager(DownloaderBase, Settings, Readme):
                 filename = url.split('/')[-1]
                 fullpath = self.downloadFile(url, filename)
                 if platform.system() == 'Windows':
-                    target = f"{BtopFontManager.WSL_FONT_DIR}/{filename}"
+                    target = f"{BtopFontManager.CYGWIN_FONT_DIR}/{filename}"
                     copy_file_to(fullpath, target)
                 else:
                     target = os.path.join(BtopFontManager.LOCAL_FONT_DIR, filename)
@@ -775,7 +775,7 @@ class BtopFontManager(DownloaderBase, Settings, Readme):
             {
                 "key": "font_urls",
                 "title": "Font URLs",
-                "description": f"List of URLs to download fonts from. Fonts will be downloaded to {BtopFontManager.WSL_FONT_DIR if platform.system() == 'Windows' else BtopFontManager.FONT_DIR_PATTERN}.",
+                "description": f"List of URLs to download fonts from. Fonts will be downloaded to {BtopFontManager.CYGWIN_FONT_DIR if platform.system() == 'Windows' else BtopFontManager.LOCAL_FONT_DIR}.",
                 "value": self.font_urls,
                 "multiple": True,
             },
@@ -787,10 +787,11 @@ class BtopFontManager(DownloaderBase, Settings, Readme):
         await scrypted_sdk.deviceManager.requestRestart()
 
     async def getReadmeMarkdown(self) -> str:
+        fontdir = BtopFontManager.CYGWIN_FONT_DIR if platform.system() == 'Windows' else BtopFontManager.LOCAL_FONT_DIR
         return f"""
 # Font Manager
 
-List fonts to download and install in the local font directory. Fonts will be installed to `{BtopFontManager.FONT_DIR_PATTERN}`.
+List fonts to download and install in the local font directory. Fonts will be installed to `{fontdir}`.
 """
 
 
@@ -838,11 +839,12 @@ class BtopThemeManager(DownloaderBase, Settings, Readme):
         return []
 
     async def getSettings(self) -> list[Setting]:
+        theme_dir = await self.themes_dir
         return [
             {
                 "key": "theme_urls",
                 "title": "Theme URLs",
-                "description": "List of URLs to download themes from. Themes will be downloaded to ~/.config/btop/themes.",
+                "description": f"List of URLs to download themes from. Themes will be downloaded to {theme_dir}.",
                 "value": self.theme_urls,
                 "multiple": True,
             },
