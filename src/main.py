@@ -716,7 +716,7 @@ class DownloaderBase(ScryptedDeviceBase):
             os.makedirs(os.path.dirname(fullpath), exist_ok=True)
             self.print("Downloading", url)
             response = urllib.request.urlopen(url)
-            if response.getcode() < 200 or response.getcode() >= 300:
+            if response.getcode() is not None and response.getcode() < 200 or response.getcode() >= 300:
                 raise Exception(f"Error downloading")
             read = 0
             with open(tmp, "wb") as f:
