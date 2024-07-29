@@ -172,7 +172,13 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             if not btop_plugin:
                 raise Exception("Please install the @scrypted/btop plugin.")
             btop = await btop_plugin.getDevice("btop-executable")
-            return btop
+            if type(btop) == str:
+                return btop
+            else:
+                settings = await btop_plugin.getSettings()
+                for setting in settings:
+                    if setting['key'] == 'btop_executable':
+                        return setting['value']
         except:
             import traceback
             traceback.print_exc()
