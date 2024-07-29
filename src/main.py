@@ -168,9 +168,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
 
     async def load_btop_exe(self) -> str:
         try:
-            btop_plugin = scrypted_sdk.systemManager.getDeviceByName('@scrypted/btop')
-            if not btop_plugin:
-                raise Exception("Please install the @scrypted/btop plugin.")
+            btop_plugin = await self.get_btop_plugin()
             btop = await btop_plugin.getDevice("btop-executable")
             if type(btop) == str:
                 return btop
@@ -184,6 +182,12 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             traceback.print_exc()
             await scrypted_sdk.deviceManager.requestRestart()
             await asyncio.sleep(3600)
+
+    async def get_btop_plugin(self) -> Any:
+        btop_plugin = scrypted_sdk.systemManager.getDeviceByName('@scrypted/btop')
+        if not btop_plugin:
+            raise Exception("Please install the @scrypted/btop plugin.")
+        return btop_plugin
 
     async def install_dependencies(self) -> None:
         try:
@@ -490,6 +494,16 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
         return settings
 
     async def putSetting(self, key: str, value: str) -> None:
+        # these are private settings intended for use by @scrypted/btop
+        if key in ['btop_restart', 'btop_config']:
+            if key == "btop_restart":
+                print("Another plugin requested restart...")
+                await scrypted_sdk.deviceManager.requestRestart()
+            elif key == "btop_config":
+                config = await self.getDevice('config')
+                await config.saveScript({ "script": value }, no_forward=True)
+            return
+
         self.storage.setItem(key, value)
         await self.onDeviceEvent(ScryptedInterface.Settings.value, None)
         print("Settings updated, will restart...")
@@ -667,9 +681,14 @@ class BtopConfig(ScryptedDeviceBase, Scriptable, Readme):
             }
         }
 
-    async def saveScript(self, script: ScriptSource) -> None:
+    async def saveScript(self, script: ScriptSource, no_forward=False) -> None:
         await self.config_reconciled
         config = await self.config_path
+
+        if not no_forward:
+            # forward update to @scrypted/btop's config
+            btop_plugin = await self.parent.get_btop_plugin()
+            await btop_plugin.putSetting('btop_config', script['script'])
 
         self.storage.setItem('config', script['script'])
         await self.onDeviceEvent(ScryptedInterface.Scriptable.value, None)
