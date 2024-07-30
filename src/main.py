@@ -14,8 +14,6 @@ import urllib.request
 import scrypted_sdk
 from scrypted_sdk import ScryptedDeviceBase, VideoCamera, ResponseMediaStreamOptions, RequestMediaStreamOptions, Settings, Setting, ScryptedInterface, ScryptedDeviceType, ScryptedMimeTypes, DeviceProvider, Scriptable, ScriptSource, Readme
 
-import btop_config
-
 
 # patch SystemManager.getDeviceByName
 def getDeviceByName(self, name: str) -> scrypted_sdk.ScryptedDevice:
@@ -278,7 +276,6 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 "name": "btop Configuration",
                 "type": ScryptedDeviceType.API.value,
                 "interfaces": [
-                    ScryptedInterface.Scriptable.value,
                     ScryptedInterface.Readme.value,
                 ],
             })
@@ -287,7 +284,6 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 "name": "Theme Manager",
                 "type": ScryptedDeviceType.API.value,
                 "interfaces": [
-                    ScryptedInterface.Settings.value,
                     ScryptedInterface.Readme.value,
                 ],
             })
@@ -321,6 +317,9 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                         await asyncio.sleep(3)
                 asyncio.create_task(periodic_monitor('Xvfb'))
                 asyncio.create_task(periodic_monitor('cygserver'))
+
+            await (await self.getDevice('config')).forward_config()
+            await (await self.getDevice('thememanager')).forward_themes()
         except:
             import traceback
             traceback.print_exc()
@@ -329,9 +328,6 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
 
     async def init_stream(self) -> None:
         await self.dependencies_installed
-
-        config = await self.getDevice('config')
-        await config.config_reconciled
 
         if self.fonts_supported:
             fontmanager = await self.getDevice('fontmanager')
@@ -494,14 +490,10 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
         return settings
 
     async def putSetting(self, key: str, value: str) -> None:
-        # these are private settings intended for use by @scrypted/btop
-        if key in ['btop_restart', 'btop_config']:
-            if key == "btop_restart":
-                print("Another plugin requested restart...")
-                await scrypted_sdk.deviceManager.requestRestart()
-            elif key == "btop_config":
-                config = await self.getDevice('config')
-                await config.saveScript({ "script": value }, no_forward=True)
+        if key == "btop_restart":
+            # private setting intended for use by @scrypted/btop
+            print("Another plugin requested restart...")
+            await scrypted_sdk.deviceManager.requestRestart()
             return
 
         self.storage.setItem(key, value)
@@ -578,145 +570,25 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
         return None
 
 
-class BtopConfig(ScryptedDeviceBase, Scriptable, Readme):
-    DEFAULT_CONFIG = btop_config.BTOP_CONFIG
-    CONFIG = os.path.expanduser(f'~/.config/btop/btop.conf')
-    HOME_THEMES_DIR = os.path.expanduser(f'~/.config/btop/themes')
-
+class BtopConfig(ScryptedDeviceBase, Readme):
     def __init__(self, nativeId: str, parent: BtopCamera) -> None:
         super().__init__(nativeId)
         self.parent = parent
-        self.config_path = asyncio.ensure_future(self.find_config())
-        self.config_reconciled = asyncio.ensure_future(self.reconcile_from_disk())
-        self.themes = []
 
-    async def find_config(self) -> str:
-        btop = await self.parent.btop
-        assert btop is not None
-
-        bin_dir = os.path.dirname(btop)
-        if platform.system() == 'Windows':
-            return os.path.join(bin_dir, 'btop.conf')
-        else:
-            return BtopConfig.CONFIG
-
-    async def reconcile_from_disk(self) -> None:
-        await self.parent.dependencies_installed
-
-        thememanager = await self.parent.getDevice('thememanager')
-        await thememanager.themes_loaded
-
-        try:
-            btop = await self.parent.btop
-            assert btop is not None
-
-            config = await self.config_path
-
-            if not os.path.exists(config):
-                os.makedirs(os.path.dirname(config), exist_ok=True)
-                with open(config, 'w') as f:
-                    f.write(BtopConfig.DEFAULT_CONFIG)
-            self.print(f"Using config file: {config}")
-
-            with open(config) as f:
-                data = f.read()
-
-            if self.storage.getItem('config') and data != self.config:
-                with open(config, 'w') as f:
-                    f.write(self.config)
-
-            if not self.storage.getItem('config'):
-                self.storage.setItem('config', data)
-
-            bin_dir = os.path.dirname(btop)
-            if platform.system() == 'Windows':
-                theme_dir = os.path.realpath(os.path.join(bin_dir, 'themes'))
-                self.print(f"Using themes dir: {theme_dir}")
-                if os.path.exists(theme_dir):
-                    self.themes = [
-                        theme.removesuffix('.theme')
-                        for theme in os.listdir(theme_dir)
-                        if theme.endswith('.theme')
-                    ]
-            else:
-                config_dir = os.path.realpath(os.path.join(os.path.dirname(bin_dir), 'share', 'btop', 'themes'))
-                self.print(f"Using themes dir: {config_dir}, {BtopConfig.HOME_THEMES_DIR}")
-                if os.path.exists(config_dir):
-                    self.themes = [
-                        theme.removesuffix('.theme')
-                        for theme in os.listdir(config_dir)
-                        if theme.endswith('.theme')
-                    ]
-                if os.path.exists(BtopConfig.HOME_THEMES_DIR):
-                    self.themes.extend([
-                        theme.removesuffix('.theme')
-                        for theme in os.listdir(BtopConfig.HOME_THEMES_DIR)
-                        if theme.endswith('.theme')
-                    ])
-            self.themes.sort()
-
-            await self.onDeviceEvent(ScryptedInterface.Readme.value, None)
-            await self.onDeviceEvent(ScryptedInterface.Scriptable.value, None)
-        except:
-            import traceback
-            traceback.print_exc()
+    async def forward_config(self) -> None:
+        btop_plugin = await self.parent.get_btop_plugin()
+        if self.config:
+            await btop_plugin.putSetting('btop_config', self.config)
 
     @property
     def config(self) -> str:
         if self.storage:
-            return self.storage.getItem('config') or BtopConfig.DEFAULT_CONFIG
-        return BtopConfig.DEFAULT_CONFIG
-
-    async def eval(self, source: ScriptSource, variables: Any = None) -> Any:
-        raise Exception("btop configuration cannot be evaluated")
-
-    async def loadScripts(self) -> Any:
-        await self.config_reconciled
-
-        return {
-            "btop.conf": {
-                "name": "btop Configuration",
-                "script": self.config,
-                "language": "ini",
-            }
-        }
-
-    async def saveScript(self, script: ScriptSource, no_forward=False) -> None:
-        await self.config_reconciled
-        config = await self.config_path
-
-        if not no_forward:
-            # forward update to @scrypted/btop's config
-            btop_plugin = await self.parent.get_btop_plugin()
-            await btop_plugin.putSetting('btop_config', script['script'])
-
-        self.storage.setItem('config', script['script'])
-        await self.onDeviceEvent(ScryptedInterface.Scriptable.value, None)
-
-        updated = False
-        with open(config) as f:
-            if f.read() != script['script']:
-                updated = True
-
-        if updated:
-            if not script['script']:
-                os.remove(config)
-            else:
-                with open(config, 'w') as f:
-                    f.write(script['script'])
-
-            self.print("Configuration updated, will restart...")
-            await scrypted_sdk.deviceManager.requestRestart()
+            return self.storage.getItem('config')
+        return None
 
     async def getReadmeMarkdown(self) -> str:
-        await self.config_reconciled
-        return f"""
-# `btop` Configuration
-
-Saving the configuration will trigger a full plugin restart to ensure the stream loads the new configuration. Additional themes can be downloaded from the theme manager page.
-
-Available themes:
-{'\n'.join(['- ' + theme for theme in self.themes])}
+        return """
+`btop` configuration editor has moved to the `@scrypted/btop` plugin.
 """
 
 
@@ -820,40 +692,15 @@ List fonts to download and install in the local font directory. Fonts will be in
 """
 
 
-class BtopThemeManager(DownloaderBase, Settings, Readme):
-    LOCAL_THEME_DIR = os.path.expanduser(f'~/.config/btop/themes')
-
+class BtopThemeManager(DownloaderBase, Readme):
     def __init__(self, nativeId: str, parent: BtopCamera):
         super().__init__(nativeId)
         self.parent = parent
-        self.themes_dir = asyncio.ensure_future(self.find_themes_dir())
-        self.themes_loaded = asyncio.ensure_future(self.load_themes())
 
-    async def find_themes_dir(self) -> str:
-        btop = await self.parent.btop
-        assert btop is not None
-
-        bin_dir = os.path.dirname(btop)
-        if platform.system() == 'Windows':
-            return os.path.realpath(os.path.join(bin_dir, 'themes'))
-        else:
-            return BtopThemeManager.LOCAL_THEME_DIR
-
-    async def load_themes(self) -> None:
-        themes_dir = await self.themes_dir
-        self.print("Using themes dir:", themes_dir)
-        os.makedirs(themes_dir, exist_ok=True)
-        try:
-            urls = self.theme_urls
-            for url in urls:
-                filename = url.split('/')[-1]
-                fullpath = self.downloadFile(url, filename)
-                target = os.path.join(themes_dir, filename)
-                shutil.copyfile(fullpath, target)
-                self.print("Installed", target)
-        except:
-            import traceback
-            traceback.print_exc()
+    async def forward_themes(self) -> None:
+        btop_plugin = await self.parent.get_btop_plugin()
+        if self.theme_urls:
+            await btop_plugin.putSetting('btop_theme_urls', self.theme_urls)
 
     @property
     def theme_urls(self) -> list[str]:
@@ -863,29 +710,9 @@ class BtopThemeManager(DownloaderBase, Settings, Readme):
                 return json.loads(urls)
         return []
 
-    async def getSettings(self) -> list[Setting]:
-        theme_dir = await self.themes_dir
-        return [
-            {
-                "key": "theme_urls",
-                "title": "Theme URLs",
-                "description": f"List of URLs to download themes from. Themes will be downloaded to {theme_dir}.",
-                "value": self.theme_urls,
-                "multiple": True,
-            },
-        ]
-
-    async def putSetting(self, key: str, value: str) -> None:
-        self.storage.setItem(key, json.dumps(value))
-        await self.onDeviceEvent(ScryptedInterface.Settings.value, None)
-        await scrypted_sdk.deviceManager.requestRestart()
-
     async def getReadmeMarkdown(self) -> str:
-        themes_dir = await self.themes_dir
-        return f"""
-# Theme Manager
-
-List themes to download and install in the local theme directory. Themes will be installed to `{themes_dir}`.
+        return """
+`btop` theme manager has moved to the `@scrypted/btop` plugin.
 """
 
 
