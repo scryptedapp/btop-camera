@@ -55,7 +55,6 @@ if __name__ == "__main__":
 
     me = psutil.Process()
     sp = None
-    monitor_not_found_count = 0
     while sp is None:
         for child in me.children(recursive=True):
             try:
@@ -64,18 +63,6 @@ if __name__ == "__main__":
                     break
             except:
                 pass
-        if monitor_file:
-            if not os.path.exists(monitor_file):
-                monitor_not_found_count += 1
-                if monitor_not_found_count > 3:
-                    break
-            else:
-                monitor_not_found_count = 0
-                try:
-                    os.remove(monitor_file)
-                except:
-                    pass
-        time.sleep(0.1)
 
     with open(os.path.join(PIDFILE_DIR, f"{kill_proc}.pid"), 'w') as f:
         f.write(str(sp.pid))
