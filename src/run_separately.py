@@ -67,8 +67,8 @@ if __name__ == "__main__":
         if monitor_file:
             if not os.path.exists(monitor_file):
                 monitor_not_found_count += 1
-                if monitor_not_found_count > 3:
-                    break
+                if monitor_not_found_count > 100:
+                    sys.exit(0)
             else:
                 monitor_not_found_count = 0
                 try:
