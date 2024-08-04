@@ -55,6 +55,7 @@ if __name__ == "__main__":
 
     me = psutil.Process()
     sp = None
+    sp_not_found_count = 0
     while sp is None:
         for child in me.children(recursive=True):
             try:
@@ -63,6 +64,11 @@ if __name__ == "__main__":
                     break
             except:
                 pass
+        if not sp:
+            sp_not_found_count += 1
+            if sp_not_found_count > 100:
+                sys.exit(0)
+            time.sleep(0.1)
 
     with open(os.path.join(PIDFILE_DIR, f"{kill_proc}.pid"), 'w') as f:
         f.write(str(sp.pid))
