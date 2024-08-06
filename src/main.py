@@ -374,7 +374,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                     run_self_cleanup_subprocess(f'{BtopCamera.XVFB_RUN} -n {self.virtual_display_num} -s \'-screen 0 {self.display_dimensions}x24\' -f {BtopCamera.XAUTH} xterm {xterm_tweaks} {fontselection} -en UTF-8 -maximized -e {exe} -p {self.btop_preset}',
                                                 env=env, kill_proc='Xvfb')
                 )
-                sleep_task = asyncio.create_task(asyncio.sleep(5))
+                sleep_task = asyncio.create_task(asyncio.sleep(15))
 
                 done, pending = await asyncio.wait([subprocess_task, sleep_task], return_when=asyncio.FIRST_COMPLETED)
                 if sleep_task in done and subprocess_task in pending:
