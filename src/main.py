@@ -164,6 +164,13 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
         self.stream_initialized = asyncio.ensure_future(self.init_stream())
         self.cygwin_ffmpeg = asyncio.ensure_future(self.get_cygwin_ffmpeg())
 
+    async def get_logger(self) -> Any:
+        return await scrypted_sdk.systemManager.api.getLogger(self.nativeId)
+
+    async def alert(self, msg) -> None:
+        logger = await self.get_logger()
+        await logger.log('a', msg)
+
     async def load_btop_exe(self) -> str:
         try:
             btop_plugin = await self.get_btop_plugin()
@@ -184,6 +191,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
     async def get_btop_plugin(self) -> Any:
         btop_plugin = scrypted_sdk.systemManager.getDeviceByName('@scrypted/btop')
         if not btop_plugin:
+            await self.alert("Please install the @scrypted/btop plugin.")
             raise Exception("Please install the @scrypted/btop plugin.")
         return btop_plugin
 
@@ -229,6 +237,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
 
                     if needed:
                         needed.sort()
+                        await self.alert(f"Please manually install the following and restart the plugin: {needed}")
                         raise Exception(f"Please manually install the following and restart the plugin: {needed}")
                 elif platform.system() == 'Darwin':
                     needed = []
@@ -243,9 +252,10 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
 
                     if needed:
                         needed.sort()
+                        await self.alert(f"Please manually install the following and restart the plugin: {needed}")
                         raise Exception(f"Please manually install the following and restart the plugin: {needed}")
                 else:
-                    raise Exception("This plugin only supports Linux and MacOS.")
+                    raise Exception("This plugin only supports Linux, MacOS, and Windows.")
 
             try:
                 await run_cleanup_subprocess('Xvfb')
