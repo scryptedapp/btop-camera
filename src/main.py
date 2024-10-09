@@ -193,7 +193,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             print("Using btop executable:", btop)
 
             installation = os.environ.get('SCRYPTED_INSTALL_ENVIRONMENT')
-            if installation in ('docker', 'lxc'):
+            if installation in ('docker', 'lxc', 'lxc-docker'):
                 await run_and_stream_output('apt-get update')
                 await run_and_stream_output('apt-get install -y xvfb xterm xfonts-base fontconfig')
             elif platform.system() == 'Windows':
@@ -426,7 +426,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
     @property
     def fonts_supported(self) -> bool:
         installation = os.environ.get('SCRYPTED_INSTALL_ENVIRONMENT')
-        if installation in ('docker', 'lxc'):
+        if installation in ('docker', 'lxc', 'lxc-docker'):
             return True
         if platform.system() == 'Linux':
             return shutil.which('fc-list') is not None

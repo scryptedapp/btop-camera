@@ -32,9 +32,6 @@
    "scrypted": {
       "name": "btop Virtual Camera",
       "runtime": "python",
-      "pythonVersion": {
-         "default": "3.12"
-      },
       "type": "Camera",
       "interfaces": [
          "VideoCamera",
