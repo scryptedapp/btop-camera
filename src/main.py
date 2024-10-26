@@ -42,6 +42,12 @@ def getDeviceByName(self, name: str) -> scrypted_sdk.ScryptedDevice:
 scrypted_sdk.systemManager.getDeviceByName = types.MethodType(getDeviceByName, scrypted_sdk.systemManager)
 
 
+def linux_data_home() -> str:
+    if 'XDG_DATA_HOME' in os.environ:
+        return os.environ['XDG_DATA_HOME']
+    return os.path.expanduser('~/.local/share')
+
+
 async def run_and_stream_output(cmd: str, env: Dict[str, str] = {}, return_pid: bool = False) -> Tuple[asyncio.Future, int] | None:
     p = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=dict(os.environ, **env))
 
@@ -372,6 +378,9 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
                 path = f'/opt/X11/bin:/opt/homebrew/opt/gnu-getopt/bin:/usr/local/opt/gnu-getopt/bin:{path}'
                 env['PATH'] = path
 
+            if platform.system() == 'Linux':
+                env['XDG_DATA_HOME'] = linux_data_home()
+
             fontselection = ''
             if self.fonts_supported:
                 font = self.xterm_font
@@ -459,11 +468,16 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
             return self.fonts_cache
 
         fonts = []
+
+        env = os.environ.copy()
+        if platform.system() == 'Linux':
+            env['XDG_DATA_HOME'] = linux_data_home()
+
         fc_list_cmd = [BtopCamera.CYGWIN_LAUNCHER, 'fc-list : family'] if platform.system() == 'Windows' else \
             ['fc-list' if platform.system() == 'Linux' else '/opt/X11/bin/fc-list', ':', 'family']
         try:
             # list font families with fc-list
-            out = subprocess.check_output(fc_list_cmd).decode().strip()
+            out = subprocess.check_output(fc_list_cmd, env=env).decode().strip()
             for line in out.splitlines():
                 font = line.strip()
                 if font:
@@ -654,7 +668,7 @@ class DownloaderBase(ScryptedDeviceBase):
 
 
 class BtopFontManager(DownloaderBase, Settings, Readme):
-    FONT_DIR_PATTERN = '~/.local/share/fonts' if platform.system() == 'Linux' else '~/.fonts'
+    FONT_DIR_PATTERN = os.path.join(linux_data_home(), 'fonts') if platform.system() == 'Linux' else '~/.fonts'
     LOCAL_FONT_DIR = os.path.expanduser(FONT_DIR_PATTERN)
     CYGWIN_FONT_DIR = '~/.local/share/fonts'
 
