@@ -640,8 +640,12 @@ class DownloaderBase(ScryptedDeviceBase):
         try:
             filesPath = os.path.join(os.environ['SCRYPTED_PLUGIN_VOLUME'], 'files')
             fullpath = os.path.join(filesPath, filename)
-            if os.path.isfile(fullpath):
-                return fullpath
+            srcPath = os.path.join(filesPath, filename + '.src')
+            if os.path.isfile(srcPath):
+                with open(srcPath, 'r') as f:
+                    src = f.read()
+                if src == url and os.path.isfile(fullpath):
+                    return fullpath
             tmp = fullpath + '.tmp'
             self.print("Creating directory for", tmp)
             os.makedirs(os.path.dirname(fullpath), exist_ok=True)
@@ -694,10 +698,31 @@ class BtopFontManager(DownloaderBase, Settings, Readme):
                 else:
                     target = os.path.join(BtopFontManager.LOCAL_FONT_DIR, filename)
                     shutil.copyfile(fullpath, target)
-                self.print("Installed", target)
+                if await self.validate_font(target):
+                    self.print("Installed", target)
+                else:
+                    self.print("Could not validate", target)
         except:
             import traceback
             traceback.print_exc()
+
+    async def validate_font(self, path) -> bool:
+        fc_list_cmd = [BtopCamera.CYGWIN_LAUNCHER, f'fc-validate {path}'] if platform.system() == 'Windows' else \
+            ['fc-validate' if platform.system() == 'Linux' else '/opt/X11/bin/fc-validate', path]
+        try:
+            process = await asyncio.create_subprocess_exec(*fc_list_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            stdout, stderr = await process.communicate()
+            stdout = stdout.decode().strip()
+            stderr = stderr.decode().strip()
+            if stdout:
+                self.print(stdout)
+            if stderr:
+                self.print(stderr)
+            if process.returncode != 0:
+                return False
+            return True
+        except:
+            return False
 
     @property
     def font_urls(self) -> list[str]:
