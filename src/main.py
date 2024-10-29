@@ -663,6 +663,8 @@ class DownloaderBase(ScryptedDeviceBase):
                     self.print("Downloaded", read, "bytes")
                     f.write(data)
             os.rename(tmp, fullpath)
+            with open(srcPath, 'w') as f:
+                f.write(url)
             return fullpath
         except:
             self.print("Error downloading", url)
