@@ -74,6 +74,8 @@ async def run_self_cleanup_subprocess(cmd: str, env: Dict[str, str] = {}, kill_p
         cmd = f"\"{BtopCamera.CYGWIN_LAUNCHER}\" \"{cmd}\""
 
     args = [
+        "-u",
+        "-S",
         BtopCamera.RUN_SEPARATELY_SCRIPT,
         cmd,
         json.dumps(env),
@@ -102,6 +104,8 @@ async def run_cleanup_subprocess(kill_proc: str) -> None:
     """Launches an instance of Python to clean up dangling processes from a previous plugin instance."""
     exe = sys.executable
     args = [
+        "-u",
+        "-S",
         BtopCamera.CLEANUP_SEPARATELY_SCRIPT,
         kill_proc,
     ]
