@@ -1,1 +1,1 @@
-psutil
+psutil==6.1.1
