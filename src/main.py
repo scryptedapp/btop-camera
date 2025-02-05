@@ -173,6 +173,7 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
         self.dependencies_installed = asyncio.ensure_future(self.install_dependencies())
         self.stream_initialized = asyncio.ensure_future(self.init_stream())
         self.cygwin_ffmpeg = asyncio.ensure_future(self.get_cygwin_ffmpeg())
+        asyncio.create_task(self.deprecation_warning())
 
     async def get_logger(self) -> Any:
         return await scrypted_sdk.systemManager.api.getLogger(self.nativeId)
@@ -180,6 +181,10 @@ class BtopCamera(ScryptedDeviceBase, VideoCamera, Settings, DeviceProvider):
     async def alert(self, msg) -> None:
         logger = await self.get_logger()
         await logger.log('a', msg)
+
+    async def deprecation_warning(self) -> None:
+        await self.dependencies_installed
+        await self.alert("This plugin is deprecated. Please use the @scrypted/x11-camera plugin instead.")
 
     async def load_btop_exe(self) -> str:
         try:

@@ -1,6 +1,6 @@
 {
    "name": "@scrypted/btop-camera",
-   "version": "0.0.22",
+   "version": "0.0.23",
    "description": "Virtual camera for Scrypted, running the btop monitoring interface",
    "license": "Apache",
    "keywords": [
@@ -44,6 +44,6 @@
       ]
    },
    "devDependencies": {
-      "@scrypted/sdk": "^0.3.102"
+      "@scrypted/sdk": "^0.3.111"
    }
 }
